@@ -7,6 +7,7 @@ const passport = require('passport');
 dotenv.config();
 
 const authRoutes = require('./src/routes/authRoutes');
+const adminRoutes = require('./src/routes/adminRoutes');
 
 const app = express();
 const PORT = process.env.PORT || 5001;
@@ -22,6 +23,7 @@ app.use(passport.initialize()); // Added passport initialize
 
 // Routes
 app.use('/api/users', authRoutes);
+app.use('/api/admin', adminRoutes);
 
 // Health Check
 app.get('/', (req, res) => {

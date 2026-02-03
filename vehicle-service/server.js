@@ -3,6 +3,7 @@ const dotenv = require('dotenv');
 const cors = require('cors');
 const connectDB = require('./src/config/db');
 const vehicleRoutes = require('./src/routes/vehicleRoutes');
+const adminVehicleRoutes = require('./src/routes/adminVehicleRoutes');
 
 dotenv.config();
 
@@ -19,6 +20,7 @@ app.use('/uploads', express.static('uploads'));
 
 // Routes
 app.use('/api/vehicles', vehicleRoutes);
+app.use('/api/vehicles/admin', adminVehicleRoutes);
 
 const PORT = process.env.PORT || 5002;
 

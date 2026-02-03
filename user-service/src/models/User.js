@@ -19,7 +19,11 @@ const userSchema = new mongoose.Schema({
     },
 
     companyName: {
-        type: String
+        type: String,
+        default: function() {
+            // For drivers, default to 'Unemployed'
+            return this.role === 'driver' ? 'Unemployed' : undefined;
+        }
     },
     firstName: {
         type: String
@@ -95,6 +99,29 @@ const userSchema = new mongoose.Schema({
     isVerified: {
         type: Boolean,
         default: false
+    },
+    // Business Verification Fields
+    isVerifiedBusiness: {
+        type: Boolean,
+        default: false
+    },
+    verificationStatus: {
+        type: String,
+        enum: ['none', 'pending', 'approved', 'rejected'],
+        default: 'none'
+    },
+    verificationRequestedAt: {
+        type: Date
+    },
+    verificationProcessedAt: {
+        type: Date
+    },
+    verificationProcessedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User'
+    },
+    verificationNotes: {
+        type: String
     }
 }, { collection: 'users' });
 

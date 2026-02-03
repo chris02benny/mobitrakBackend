@@ -7,6 +7,7 @@ const nodemailer = require('nodemailer');
 const passport = require('passport');
 const auth = require('../middleware/authMiddleware');
 const { upload } = require('../config/cloudinaryConfig');
+const { sendVerificationRequestEmail } = require('../services/emailService');
 
 // Nodemailer Transporter
 const transporter = nodemailer.createTransport({
@@ -434,7 +435,13 @@ router.get('/me', auth, async (req, res) => {
                 dlDetails: user.dlDetails,
                 dlFrontImage: user.dlFrontImage,
                 dlBackImage: user.dlBackImage,
-                hasPassword: !!user.password
+                hasPassword: !!user.password,
+                // Verification fields
+                isVerifiedBusiness: user.isVerifiedBusiness,
+                verificationStatus: user.verificationStatus,
+                verificationRequestedAt: user.verificationRequestedAt,
+                verificationProcessedAt: user.verificationProcessedAt,
+                verificationNotes: user.verificationNotes
             }
         });
     } catch (err) {
@@ -709,6 +716,162 @@ router.post('/logout', auth, async (req, res) => {
         res.json({ message: 'Logout successful' });
     } catch (err) {
         console.error(err);
+        res.status(500).json({ message: 'Server Error' });
+    }
+});
+
+// @route   POST /api/users/request-verification
+// @desc    Request business verification (Fleet Manager only)
+// @access  Private
+router.post('/request-verification', auth, async (req, res) => {
+    try {
+        const user = await User.findById(req.user.id);
+        
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+        
+        if (user.role !== 'fleetmanager') {
+            return res.status(403).json({ message: 'Only fleet managers can request business verification' });
+        }
+        
+        if (user.isVerifiedBusiness) {
+            return res.status(400).json({ message: 'Business is already verified' });
+        }
+        
+        if (user.verificationStatus === 'pending') {
+            return res.status(400).json({ message: 'Verification request is already pending' });
+        }
+        
+        // Check if required fields are filled
+        if (!user.companyName) {
+            return res.status(400).json({ message: 'Please complete your company name before requesting verification' });
+        }
+        
+        user.verificationStatus = 'pending';
+        user.verificationRequestedAt = new Date();
+        
+        await user.save();
+        
+        // Send email notification
+        await sendVerificationRequestEmail(user.email, user.companyName);
+        
+        res.json({
+            message: 'Verification request submitted successfully. Our team will review your profile.',
+            verificationStatus: user.verificationStatus,
+            verificationRequestedAt: user.verificationRequestedAt
+        });
+    } catch (err) {
+        console.error('Error requesting verification:', err);
+        res.status(500).json({ message: 'Server Error' });
+    }
+});
+
+// @route   GET /api/users/verification-status
+// @desc    Get current verification status (Fleet Manager only)
+// @access  Private
+router.get('/verification-status', auth, async (req, res) => {
+    try {
+        const user = await User.findById(req.user.id);
+        
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+        
+        res.json({
+            isVerifiedBusiness: user.isVerifiedBusiness,
+            verificationStatus: user.verificationStatus,
+            verificationRequestedAt: user.verificationRequestedAt,
+            verificationProcessedAt: user.verificationProcessedAt,
+            verificationNotes: user.verificationNotes
+        });
+    } catch (err) {
+        console.error('Error getting verification status:', err);
+        res.status(500).json({ message: 'Server Error' });
+    }
+});
+
+// @route   GET /api/users/drivers/available
+// @desc    Get available drivers with complete profiles (for hiring)
+// @access  Public (internal service use)
+router.get('/drivers/available', async (req, res) => {
+    try {
+        const { page = 1, limit = 20 } = req.query;
+        const skip = (parseInt(page) - 1) * parseInt(limit);
+
+        const query = {
+            role: 'driver',
+            isProfileComplete: true,
+            $or: [
+                { companyName: 'Unemployed' },
+                { companyName: { $exists: false } },
+                { companyName: null }
+            ]
+        };
+
+        const [drivers, total] = await Promise.all([
+            User.find(query)
+                .select('-password -otp -otpExpires')
+                .sort({ createdAt: -1 })
+                .skip(skip)
+                .limit(parseInt(limit)),
+            User.countDocuments(query)
+        ]);
+
+        res.json({
+            success: true,
+            drivers: drivers.map(user => ({
+                _id: user._id,
+                email: user.email,
+                firstName: user.firstName,
+                lastName: user.lastName,
+                profileImage: user.profileImage,
+                companyName: user.companyName || 'Unemployed',
+                dlDetails: user.dlDetails,
+                isProfileComplete: user.isProfileComplete,
+                createdAt: user.createdAt
+            })),
+            total,
+            pagination: {
+                current: parseInt(page),
+                pages: Math.ceil(total / parseInt(limit)),
+                total
+            }
+        });
+    } catch (err) {
+        console.error('Error fetching available drivers:', err);
+        res.status(500).json({ message: 'Server Error' });
+    }
+});
+
+// @route   GET /api/users/:userId
+// @desc    Get user by ID (for inter-service communication)
+// @access  Public (internal service use)
+router.get('/:userId', async (req, res) => {
+    try {
+        const user = await User.findById(req.params.userId).select('-password -otp -otpExpires');
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+        res.json({
+            user: {
+                id: user._id,
+                email: user.email,
+                role: user.role,
+                companyName: user.companyName,
+                firstName: user.firstName,
+                lastName: user.lastName,
+                profileImage: user.profileImage,
+                officeLocation: user.officeLocation,
+                isProfileComplete: user.isProfileComplete,
+                isVerifiedBusiness: user.isVerifiedBusiness,
+                verificationStatus: user.verificationStatus,
+                dlDetails: user.dlDetails,
+                phone: user.phone
+            }
+        });
+    } catch (err) {
+        console.error('Error fetching user by ID:', err);
         res.status(500).json({ message: 'Server Error' });
     }
 });

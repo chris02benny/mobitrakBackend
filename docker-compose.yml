@@ -49,6 +49,28 @@ services:
     networks:
       - mobitrak-network
 
+  # Driver Management Service Microservice
+  driver-management-service:
+    build: ./driver-management-service
+    container_name: mobitrak-driver-management-service
+    ports:
+      - "${DRIVER_SERVICE_PORT}:5003"
+    environment:
+      - PORT=5003
+      - MONGO_URI=${MONGO_URI}
+      - JWT_SECRET=${JWT_SECRET}
+      - NODE_ENV=${NODE_ENV:-development}
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_PORT=${SMTP_PORT}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASS=${SMTP_PASS}
+      - EMAIL_FROM=${EMAIL_FROM}
+      - USER_SERVICE_URL=http://user-service:5001
+    depends_on:
+      - user-service
+    networks:
+      - mobitrak-network
+
 networks:
   mobitrak-network:
     driver: bridge
