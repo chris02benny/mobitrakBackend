@@ -71,6 +71,20 @@ services:
     networks:
       - mobitrak-network
 
+  # Trip Service Microservice
+  trip-service:
+    build: ./trip-service
+    container_name: mobitrak-trip-service
+    ports:
+      - "${TRIP_SERVICE_PORT}:5004"
+    environment:
+      - PORT=5004
+      - MONGO_URI=${MONGO_URI}
+      - JWT_SECRET=${JWT_SECRET}
+      - MAPBOX_ACCESS_TOKEN=${MAPBOX_ACCESS_TOKEN}
+    networks:
+      - mobitrak-network
+
 networks:
   mobitrak-network:
     driver: bridge
