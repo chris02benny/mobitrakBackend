@@ -11,7 +11,7 @@ const { sendVerificationApprovedEmail, sendVerificationRejectedEmail } = require
  */
 router.put('/users/:id/internal-update', async (req, res) => {
     try {
-        const { companyName } = req.body;
+        const { companyName, assignmentStatus } = req.body;
         const user = await User.findById(req.params.id);
 
         if (!user) {
@@ -23,6 +23,14 @@ router.put('/users/:id/internal-update', async (req, res) => {
             user.companyName = companyName;
         }
 
+        // Update assignment status (for drivers)
+        if (assignmentStatus !== undefined) {
+            if (!['UNASSIGNED', 'ASSIGNED'].includes(assignmentStatus)) {
+                return res.status(400).json({ message: 'Invalid assignment status. Must be UNASSIGNED or ASSIGNED' });
+            }
+            user.assignmentStatus = assignmentStatus;
+        }
+
         await user.save();
 
         res.json({
@@ -30,7 +38,8 @@ router.put('/users/:id/internal-update', async (req, res) => {
             user: {
                 id: user._id,
                 email: user.email,
-                companyName: user.companyName
+                companyName: user.companyName,
+                assignmentStatus: user.assignmentStatus
             }
         });
     } catch (err) {

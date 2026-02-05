@@ -93,6 +93,50 @@ const employmentSchema = new mongoose.Schema({
         index: true
     },
 
+    // Assignment Status (for trip assignments)
+    assignmentStatus: {
+        type: String,
+        enum: ['UNASSIGNED', 'ASSIGNED'],
+        default: 'UNASSIGNED',
+        index: true
+    },
+
+    // Assigned Vehicle (if any)
+    assignedVehicle: {
+        vehicleId: {
+            type: mongoose.Schema.Types.ObjectId
+        },
+        assignedOn: {
+            type: Date
+        },
+        notes: {
+            type: String,
+            maxlength: 500
+        }
+    },
+
+    // Vehicle assignment history
+    vehicleAssignmentHistory: [{
+        vehicleId: {
+            type: mongoose.Schema.Types.ObjectId,
+            required: true
+        },
+        assignedOn: {
+            type: Date,
+            required: true,
+            default: Date.now
+        },
+        unassignedOn: {
+            type: Date
+        },
+        reason: {
+            type: String
+        },
+        notes: {
+            type: String
+        }
+    }],
+
     // Dates
     startDate: {
         type: Date,
@@ -131,32 +175,62 @@ employmentSchema.index({ companyId: 1, status: 1 });
 employmentSchema.index({ driverId: 1, companyId: 1, status: 1 });
 
 // Virtual for employment duration
-employmentSchema.virtual('durationInDays').get(function() {
+employmentSchema.virtual('durationInDays').get(function () {
     const endDate = this.endDate || new Date();
     const diffTime = Math.abs(endDate - this.startDate);
     return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 });
 
 // Method to check if employment is current
-employmentSchema.methods.isCurrent = function() {
+employmentSchema.methods.isCurrent = function () {
     return this.status === 'ACTIVE' && !this.endDate;
 };
 
 // Static method to get employment history for a driver
-employmentSchema.statics.getDriverHistory = function(driverId) {
+employmentSchema.statics.getDriverHistory = function (driverId) {
     return this.find({ driverId })
         .sort({ startDate: -1 })
         .exec();
 };
 
 // Static method to get active employees for a company
-employmentSchema.statics.getCompanyActiveEmployees = function(companyId) {
-    return this.find({ 
-        companyId, 
-        status: 'ACTIVE' 
+employmentSchema.statics.getCompanyActiveEmployees = function (companyId) {
+    return this.find({
+        companyId,
+        status: 'ACTIVE'
     })
-    .sort({ startDate: -1 })
-    .exec();
+        .sort({ startDate: -1 })
+        .exec();
+};
+
+// Method to assign vehicle
+employmentSchema.methods.assignVehicle = function (vehicleId, notes) {
+    this.assignedVehicle = {
+        vehicleId,
+        assignedOn: new Date(),
+        notes
+    };
+};
+
+// Method to unassign vehicle
+employmentSchema.methods.unassignVehicle = function (reason) {
+    if (this.assignedVehicle && this.assignedVehicle.vehicleId) {
+        // Add to history
+        this.vehicleAssignmentHistory.push({
+            vehicleId: this.assignedVehicle.vehicleId,
+            assignedOn: this.assignedVehicle.assignedOn,
+            unassignedOn: new Date(),
+            reason,
+            notes: this.assignedVehicle.notes
+        });
+
+        // Clear current assignment
+        this.assignedVehicle = {
+            vehicleId: null,
+            assignedOn: null,
+            notes: null
+        };
+    }
 };
 
 module.exports = mongoose.model('Employment', employmentSchema);

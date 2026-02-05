@@ -284,14 +284,140 @@ router.post('/login', async (req, res) => {
     }
 });
 
+// @route   POST /api/users/forgot-password
+// @desc    Send OTP for password reset
+// @access  Public
+router.post('/forgot-password', async (req, res) => {
+    try {
+        const { email } = req.body;
 
+        if (!email) {
+            return res.status(400).json({ message: 'Email is required' });
+        }
 
+        // Check if user exists
+        const user = await User.findOne({ email });
+        if (!user) {
+            return res.status(404).json({ message: 'No account found with this email' });
+        }
 
+        // Check if user has a password (Google auth users might not have password)
+        if (!user.password) {
+            return res.status(400).json({ message: 'This account uses Google Sign-In. Please use Google to login.' });
+        }
 
+        // Generate OTP
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const otpExpires = Date.now() + 10 * 60 * 1000; // 10 minutes
 
+        // Save OTP to user
+        user.otp = otp;
+        user.otpExpires = otpExpires;
+        await user.save();
 
+        // Send OTP email
+        await sendOtpEmail(email, otp);
 
+        res.json({
+            message: 'Password reset OTP sent to your email',
+            email: email
+        });
 
+    } catch (err) {
+        console.error('Forgot password error:', err);
+        res.status(500).json({ message: 'Server Error. Please try again.' });
+    }
+});
+
+// @route   POST /api/users/verify-reset-otp
+// @desc    Verify OTP for password reset
+// @access  Public
+router.post('/verify-reset-otp', async (req, res) => {
+    try {
+        const { email, otp } = req.body;
+
+        if (!email || !otp) {
+            return res.status(400).json({ message: 'Email and OTP are required' });
+        }
+
+        // Find user and select OTP fields
+        const user = await User.findOne({ email }).select('+otp +otpExpires');
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        // Check if OTP matches
+        if (user.otp !== otp) {
+            return res.status(400).json({ message: 'Invalid OTP' });
+        }
+
+        // Check if OTP expired
+        if (user.otpExpires < Date.now()) {
+            return res.status(400).json({ message: 'OTP has expired. Please request a new one.' });
+        }
+
+        res.json({
+            message: 'OTP verified successfully',
+            verified: true
+        });
+
+    } catch (err) {
+        console.error('Verify reset OTP error:', err);
+        res.status(500).json({ message: 'Server Error. Please try again.' });
+    }
+});
+
+// @route   POST /api/users/reset-password
+// @desc    Reset password after OTP verification
+// @access  Public
+router.post('/reset-password', async (req, res) => {
+    try {
+        const { email, otp, newPassword } = req.body;
+
+        if (!email || !otp || !newPassword) {
+            return res.status(400).json({ message: 'Email, OTP, and new password are required' });
+        }
+
+        // Validate password strength
+        if (newPassword.length < 6) {
+            return res.status(400).json({ message: 'Password must be at least 6 characters long' });
+        }
+
+        // Find user and select OTP fields
+        const user = await User.findOne({ email }).select('+otp +otpExpires +password');
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        // Check if OTP matches
+        if (user.otp !== otp) {
+            return res.status(400).json({ message: 'Invalid OTP' });
+        }
+
+        // Check if OTP expired
+        if (user.otpExpires < Date.now()) {
+            return res.status(400).json({ message: 'OTP has expired. Please request a new one.' });
+        }
+
+        // Hash new password
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+        // Update password and clear OTP
+        user.password = hashedPassword;
+        user.otp = undefined;
+        user.otpExpires = undefined;
+        await user.save();
+
+        res.json({
+            message: 'Password reset successfully. You can now login with your new password.'
+        });
+
+    } catch (err) {
+        console.error('Reset password error:', err);
+        res.status(500).json({ message: 'Server Error. Please try again.' });
+    }
+});
 
 // @route   GET /api/users/auth/google
 // @desc    Auth with Google
@@ -474,6 +600,30 @@ router.put('/profile', auth, async (req, res) => {
         await user.save();
 
         console.log('Saved user officeLocation:', JSON.stringify(user.officeLocation, null, 2));
+
+        // Broadcast office location update via Socket.IO if office location changed
+        if (officeLocation !== undefined) {
+            const io = req.app.get('io');
+            if (io) {
+                const locationUpdate = {
+                    userId: user._id,
+                    officeLocation: user.officeLocation,
+                    companyName: user.companyName,
+                    timestamp: new Date()
+                };
+                
+                // Broadcast to user's room (all their open sessions)
+                io.to(`user-${user._id}`).emit('office-location-update', locationUpdate);
+                console.log('Broadcasted office location update to user room:', `user-${user._id}`);
+            }
+
+            // Create notification for office location update
+            const NotificationService = require('../services/notificationService');
+            await NotificationService.notifyOfficeLocationUpdate(user._id, {
+                address: officeLocation.address,
+                coordinates: officeLocation.coordinates
+            });
+        }
 
         res.json({
             message: 'Profile updated successfully',
@@ -867,7 +1017,8 @@ router.get('/:userId', async (req, res) => {
                 isVerifiedBusiness: user.isVerifiedBusiness,
                 verificationStatus: user.verificationStatus,
                 dlDetails: user.dlDetails,
-                phone: user.phone
+                phone: user.phone,
+                assignmentStatus: user.assignmentStatus
             }
         });
     } catch (err) {

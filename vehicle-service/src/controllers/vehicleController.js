@@ -1,6 +1,8 @@
 const Vehicle = require('../models/Vehicle');
+const LiveTrackingDevice = require('../models/LiveTrackingDevice');
 const { extractTextFromImage } = require('../services/ocrSpace.service');
 const { extractRCFieldsWithAI } = require('../services/aiExtraction.service');
+const NotificationClient = require('../services/notificationClient');
 
 /**
  * Parse raw OCR text into structured vehicle data
@@ -208,15 +210,35 @@ exports.createVehicle = async (req, res) => {
             vehicleImagePaths = req.files.vehicleImages.map(file => file.path);
         }
 
+        // Ensure registrationNumber is synced with regnNo if not provided
+        const vehicleData = {
+            ...req.body,
+            registrationNumber: req.body.registrationNumber || req.body.regnNo,
+            make: req.body.make || req.body.makersName,
+        };
+
         const newVehicle = new Vehicle({
             businessId: req.user.id,
-            ...req.body, // Contains extracted & edited fields
+            ...vehicleData, // Contains extracted & edited fields
             rcBookImage: rcBookPath,
             images: vehicleImagePaths,
             description: req.body.description || ''
         });
 
         const savedVehicle = await newVehicle.save();
+
+        // Create notification for vehicle added
+        try {
+            await NotificationClient.notifyVehicleAdded(req.user.id, {
+                vehicleId: savedVehicle._id,
+                registrationNumber: savedVehicle.registrationNumber || savedVehicle.regnNo,
+                make: savedVehicle.make || savedVehicle.makersName || 'Unknown',
+                model: savedVehicle.model || savedVehicle.vehicleClass || ''
+            });
+        } catch (notifError) {
+            console.error('Failed to send notification:', notifError);
+            // Don't fail the request if notification fails
+        }
 
         res.status(201).json({
             message: 'Vehicle added successfully',
@@ -232,9 +254,242 @@ exports.createVehicle = async (req, res) => {
 exports.getVehicles = async (req, res) => {
     try {
         const vehicles = await Vehicle.find({ businessId: req.user.id }).sort({ createdAt: -1 });
-        res.json(vehicles);
+        
+        // Get tracking device info for all vehicles
+        const vehicleIds = vehicles.map(v => v._id);
+        const trackingDevices = await LiveTrackingDevice.find({ 
+            vehicleId: { $in: vehicleIds } 
+        }).select('vehicleId isActive');
+        
+        // Create a map for quick lookup
+        const trackingMap = {};
+        trackingDevices.forEach(device => {
+            trackingMap[device.vehicleId.toString()] = {
+                hasTracking: true,
+                isActive: device.isActive
+            };
+        });
+        
+        // Add tracking info to vehicles
+        const vehiclesWithTracking = vehicles.map(vehicle => {
+            const vehicleObj = vehicle.toObject();
+            const tracking = trackingMap[vehicle._id.toString()];
+            return {
+                ...vehicleObj,
+                hasLiveTracking: tracking?.hasTracking || false,
+                trackingActive: tracking?.isActive || false
+            };
+        });
+        
+        res.json(vehiclesWithTracking);
     } catch (error) {
         console.error('Error in getVehicles:', error);
         res.status(500).json({ message: 'Server error fetching vehicles', error: error.message });
+    }
+};
+
+exports.getVehicleById = async (req, res) => {
+    try {
+        const vehicle = await Vehicle.findById(req.params.id);
+        if (!vehicle) {
+            return res.status(404).json({ message: 'Vehicle not found' });
+        }
+        res.json(vehicle);
+    } catch (error) {
+        console.error('Error in getVehicleById:', error);
+        res.status(500).json({ message: 'Server error fetching vehicle', error: error.message });
+    }
+};
+
+exports.updateVehicle = async (req, res) => {
+    try {
+        const vehicleId = req.params.id;
+        const vehicle = await Vehicle.findById(vehicleId);
+
+        if (!vehicle) {
+            return res.status(404).json({ message: 'Vehicle not found' });
+        }
+
+        // Check if user owns this vehicle
+        if (vehicle.businessId.toString() !== req.user.id) {
+            return res.status(403).json({ message: 'Not authorized to update this vehicle' });
+        }
+
+        // Handle RC Book update
+        let rcBookPath = vehicle.rcBookImage;
+        if (req.files && req.files.rcBook) {
+            rcBookPath = req.files.rcBook[0].path;
+        } else if (req.body.rcBookImage) {
+            rcBookPath = req.body.rcBookImage;
+        }
+
+        // Handle vehicle images
+        let vehicleImagePaths = vehicle.images || [];
+        if (req.body.existingVehicleImages) {
+            vehicleImagePaths = JSON.parse(req.body.existingVehicleImages);
+        }
+        if (req.files && req.files.vehicleImages) {
+            const newImages = req.files.vehicleImages.map(file => file.path);
+            vehicleImagePaths = [...vehicleImagePaths, ...newImages];
+        }
+
+        // Ensure registrationNumber and make are synced
+        const vehicleData = {
+            ...req.body,
+            registrationNumber: req.body.registrationNumber || req.body.regnNo || vehicle.registrationNumber,
+            make: req.body.make || req.body.makersName || vehicle.make,
+        };
+
+        // Update vehicle
+        const updatedVehicle = await Vehicle.findByIdAndUpdate(
+            vehicleId,
+            {
+                ...vehicleData,
+                rcBookImage: rcBookPath,
+                images: vehicleImagePaths
+            },
+            { new: true, runValidators: true }
+        );
+
+        // Send notification for vehicle update
+        try {
+            await NotificationClient.notifyVehicleUpdated(req.user.id, {
+                vehicleId: updatedVehicle._id,
+                registrationNumber: updatedVehicle.registrationNumber || updatedVehicle.regnNo,
+                make: updatedVehicle.make || updatedVehicle.makersName || 'Unknown',
+                model: updatedVehicle.model || updatedVehicle.vehicleClass || '',
+                vehicleType: updatedVehicle.vehicleType
+            });
+        } catch (notifError) {
+            console.error('Failed to send notification:', notifError);
+        }
+
+        res.json({
+            message: 'Vehicle updated successfully',
+            vehicle: updatedVehicle
+        });
+    } catch (error) {
+        console.error('Error in updateVehicle:', error);
+        res.status(500).json({ message: 'Server error updating vehicle', error: error.message });
+    }
+};
+
+exports.deleteVehicle = async (req, res) => {
+    try {
+        const vehicleId = req.params.id;
+        const vehicle = await Vehicle.findById(vehicleId);
+
+        if (!vehicle) {
+            return res.status(404).json({ message: 'Vehicle not found' });
+        }
+
+        // Check if user owns this vehicle
+        if (vehicle.businessId.toString() !== req.user.id) {
+            return res.status(403).json({ message: 'Not authorized to delete this vehicle' });
+        }
+
+        await Vehicle.findByIdAndDelete(vehicleId);
+
+        res.json({ message: 'Vehicle deleted successfully' });
+    } catch (error) {
+        console.error('Error in deleteVehicle:', error);
+        res.status(500).json({ message: 'Server error deleting vehicle', error: error.message });
+    }
+};
+
+// Update vehicle status (IDLE/ASSIGNED) - for internal service-to-service calls
+exports.updateVehicleStatus = async (req, res) => {
+    try {
+        const vehicleId = req.params.id;
+        const { status } = req.body;
+
+        // Validate status
+        if (!['IDLE', 'ASSIGNED'].includes(status)) {
+            return res.status(400).json({ message: 'Invalid status. Must be IDLE or ASSIGNED' });
+        }
+
+        const vehicle = await Vehicle.findById(vehicleId);
+
+        if (!vehicle) {
+            return res.status(404).json({ message: 'Vehicle not found' });
+        }
+
+        // Update status
+        vehicle.status = status;
+        await vehicle.save();
+
+        res.json({
+            message: 'Vehicle status updated successfully',
+            vehicle: {
+                _id: vehicle._id,
+                registrationNumber: vehicle.registrationNumber,
+                status: vehicle.status
+            }
+        });
+    } catch (error) {
+        console.error('Error in updateVehicleStatus:', error);
+        res.status(500).json({ message: 'Server error updating vehicle status', error: error.message });
+    }
+};
+
+exports.getAvailableVehicles = async (req, res) => {
+    try {
+        const { startDateTime, endDateTime } = req.query;
+        const businessId = req.user.id;
+
+        // Get all vehicles for this business
+        const allVehicles = await Vehicle.find({ businessId }).sort({ createdAt: -1 });
+
+        // Fetch trip data to check availability
+        let busyVehicleIds = [];
+        try {
+            const axios = require('axios');
+            const tripServiceUrl = process.env.TRIP_SERVICE_URL || 'http://trip-service:5004';
+            const tripResponse = await axios.get(`${tripServiceUrl}/api/trips`, {
+                headers: { 'x-user-id': businessId }
+            });
+
+            const activeTrips = tripResponse.data.trips || [];
+            
+            // Filter trips that are scheduled or in-progress
+            const relevantTrips = activeTrips.filter(trip => 
+                trip.status === 'scheduled' || trip.status === 'in-progress'
+            );
+
+            // If date range is provided, check for overlaps
+            if (startDateTime && endDateTime) {
+                const requestStart = new Date(startDateTime);
+                const requestEnd = new Date(endDateTime);
+
+                busyVehicleIds = relevantTrips
+                    .filter(trip => {
+                        const tripStart = new Date(trip.startDateTime);
+                        const tripEnd = new Date(trip.endDateTime);
+
+                        // Check if trips overlap
+                        return (
+                            (requestStart <= tripEnd && requestEnd >= tripStart) ||
+                            (tripStart <= requestEnd && tripEnd >= requestStart)
+                        );
+                    })
+                    .map(trip => trip.vehicleId.toString());
+            } else {
+                // No date range provided, just check if vehicle has any active trip
+                busyVehicleIds = relevantTrips.map(trip => trip.vehicleId.toString());
+            }
+        } catch (error) {
+            console.error('Error fetching trip data:', error.message);
+            // Continue without trip filtering if service is unavailable
+        }
+
+        // Filter out busy vehicles
+        const availableVehicles = allVehicles.filter(vehicle => 
+            !busyVehicleIds.includes(vehicle._id.toString())
+        );
+
+        res.json(availableVehicles);
+    } catch (error) {
+        console.error('Error in getAvailableVehicles:', error);
+        res.status(500).json({ message: 'Server error fetching available vehicles', error: error.message });
     }
 };

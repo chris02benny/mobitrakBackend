@@ -4,6 +4,7 @@ const driverEventEmitter = require('../config/eventEmitter');
 const { asyncHandler, NotFoundError, ValidationError, ForbiddenError, ConflictError } = require('../middleware/errorHandler');
 const { sendHireRequestEmail, sendHireResponseEmail } = require('../services/emailService');
 const axios = require('axios');
+const NotificationClient = require('../services/notificationClient');
 
 // Helper to get user details from user-service
 const getUserById = async (userId) => {
@@ -383,6 +384,7 @@ const respondToJobRequest = asyncHandler(async (req, res) => {
 
     const previousStatus = jobRequest.status;
     let newStatus;
+    let employment; // Declare outside switch for use in notifications
 
     switch (action) {
         case 'accept':
@@ -400,7 +402,7 @@ const respondToJobRequest = asyncHandler(async (req, res) => {
             
             // Auto-finalize hiring when driver accepts
             // Create employment record with job request details
-            const employment = new Employment({
+            employment = new Employment({
                 driverId: userId,
                 companyId: jobRequest.companyId,
                 sourceJobRequest: jobRequest._id,
@@ -423,25 +425,28 @@ const respondToJobRequest = asyncHandler(async (req, res) => {
             });
             await employment.save();
 
-            // Update driver's user record with company name
+            // Update driver's user record with company name and set assignment status to UNASSIGNED
             try {
                 const companyUser = await getUserById(jobRequest.companyId);
                 if (companyUser && companyUser.companyName) {
-                    // Update driver's user record with company name
+                    // Update driver's user record with company name and assignment status
                     const userServiceUrl = process.env.USER_SERVICE_URL || 'http://localhost:5001';
                     await axios.put(
                         `${userServiceUrl}/api/admin/users/${userId}/internal-update`,
-                        { companyName: companyUser.companyName },
+                        { 
+                            companyName: companyUser.companyName,
+                            assignmentStatus: 'UNASSIGNED'
+                        },
                         {
                             headers: {
                                 'Content-Type': 'application/json'
                             }
                         }
                     );
-                    console.log(`Updated driver ${userId} with company name: ${companyUser.companyName}`);
+                    console.log(`Updated driver ${userId} with company name: ${companyUser.companyName} and status: UNASSIGNED`);
                 }
             } catch (error) {
-                console.error('Error updating driver company name:', error.message);
+                console.error('Error updating driver company name and status:', error.message);
                 // Don't fail the acceptance if company name update fails
             }
 
@@ -487,8 +492,9 @@ const respondToJobRequest = asyncHandler(async (req, res) => {
         getUserById(jobRequest.companyId)
     ]);
 
+    const driverName = `${driverUser?.firstName || ''} ${driverUser?.lastName || ''}`.trim() || 'Driver';
+
     if (companyUser?.email) {
-        const driverName = `${driverUser?.firstName || ''} ${driverUser?.lastName || ''}`.trim() || 'Driver';
         const companyName = companyUser?.companyName || 'Your Company';
         const rejectionReason = action === 'reject' ? (message || rejection?.details || '') : '';
         
@@ -498,6 +504,32 @@ const respondToJobRequest = asyncHandler(async (req, res) => {
             driverName,
             newStatus === 'HIRED' ? 'ACCEPTED' : newStatus,
             rejectionReason
+        );
+    }
+
+    // Create notification for company
+    if (action === 'accept') {
+        await NotificationClient.notifyHireRequestAccepted(
+            jobRequest.companyId,
+            userId,
+            driverName,
+            jobRequest._id
+        );
+        
+        // Also create driver hired notification
+        await NotificationClient.notifyDriverHired(
+            jobRequest.companyId,
+            userId,
+            driverName,
+            employment._id
+        );
+    } else if (action === 'reject') {
+        await NotificationClient.notifyHireRequestRejected(
+            jobRequest.companyId,
+            userId,
+            driverName,
+            jobRequest._id,
+            message || rejection?.details
         );
     }
 

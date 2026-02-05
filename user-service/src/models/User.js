@@ -122,6 +122,12 @@ const userSchema = new mongoose.Schema({
     },
     verificationNotes: {
         type: String
+    },
+    // Driver Assignment Status (for trip assignments)
+    assignmentStatus: {
+        type: String,
+        enum: ['UNASSIGNED', 'ASSIGNED'],
+        default: 'UNASSIGNED'
     }
 }, { collection: 'users' });
 

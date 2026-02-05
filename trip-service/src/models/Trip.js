@@ -19,6 +19,7 @@ const stopSchema = new mongoose.Schema({
     address: String,
     arrivalTime: Date,
     departureTime: Date,
+    arrivedAt: Date, // Actual arrival time
     status: {
         type: String,
         enum: ['pending', 'reached', 'departed'],
@@ -45,6 +46,19 @@ const tripSchema = new mongoose.Schema({
     driverId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User'
+    },
+    customerName: {
+        type: String,
+        trim: true
+    },
+    customerEmail: {
+        type: String,
+        trim: true,
+        lowercase: true
+    },
+    customerContact: {
+        type: String,
+        trim: true
     },
     startDestination: {
         name: {
@@ -91,6 +105,14 @@ const tripSchema = new mongoose.Schema({
         type: Date,
         required: true
     },
+    actualStartDateTime: {
+        type: Date,
+        default: null
+    },
+    actualEndDateTime: {
+        type: Date,
+        default: null
+    },
     route: {
         type: Object, // GeoJSON LineString
         default: null
@@ -103,9 +125,21 @@ const tripSchema = new mongoose.Schema({
         type: Number, // in minutes
         default: 0
     },
+    amountPerKm: {
+        type: Number,
+        default: 0
+    },
+    vehicleRent: {
+        type: Number,
+        default: 0
+    },
     amount: {
         type: Number,
         default: 0
+    },
+    isTwoWay: {
+        type: Boolean,
+        default: false
     },
     status: {
         type: String,
@@ -123,7 +157,22 @@ const tripSchema = new mongoose.Schema({
         },
         address: String,
         reason: String
-    }]
+    }],
+    currentLocation: {
+        type: {
+            type: String,
+            enum: ['Point'],
+            default: 'Point'
+        },
+        coordinates: {
+            type: [Number], // [longitude, latitude]
+            default: null
+        }
+    },
+    lastLocationUpdate: {
+        type: Date,
+        default: null
+    }
 }, {
     timestamps: true
 });

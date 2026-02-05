@@ -2,6 +2,7 @@ const Employment = require('../models/Employment');
 const driverEventEmitter = require('../config/eventEmitter');
 const { asyncHandler, NotFoundError, ValidationError, ForbiddenError } = require('../middleware/errorHandler');
 const axios = require('axios');
+const NotificationClient = require('../services/notificationClient');
 
 // Helper to get user details from user-service
 const getUserById = async (userId) => {
@@ -68,11 +69,12 @@ const getEmploymentById = asyncHandler(async (req, res) => {
  */
 const getCompanyEmployees = asyncHandler(async (req, res) => {
     const companyId = req.user.userId;
-    const { status, position, page = 1, limit = 20 } = req.query;
+    const { status, position, assignmentStatus, page = 1, limit = 20 } = req.query;
 
     const query = { companyId };
     if (status) query.status = status;
     if (position) query.position = position;
+    if (assignmentStatus) query.assignmentStatus = assignmentStatus;
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
@@ -88,13 +90,26 @@ const getCompanyEmployees = asyncHandler(async (req, res) => {
     const employmentsWithUserDetails = await Promise.all(
         employments.map(async (employment) => {
             const empObj = employment.toObject();
-            
+
+            // Add driverDetails field for easier frontend access
+            empObj.driverDetails = null;
+
             // Fetch user details from user-service
             if (empObj.driverId) {
                 try {
                     const userDetails = await getUserById(empObj.driverId);
-                    
+
                     if (userDetails) {
+                        // Add driverDetails for easier access
+                        empObj.driverDetails = {
+                            firstName: userDetails.firstName,
+                            lastName: userDetails.lastName,
+                            email: userDetails.email,
+                            profileImage: userDetails.profileImage,
+                            phone: userDetails.phone,
+                            assignmentStatus: userDetails.assignmentStatus || 'UNASSIGNED'
+                        };
+
                         // Structure to match frontend expectations: driverId.userDetails
                         empObj.driverId = {
                             _id: empObj.driverId,
@@ -115,14 +130,15 @@ const getCompanyEmployees = asyncHandler(async (req, res) => {
                             },
                             dlFrontUrl: userDetails.dlDetails?.dlFrontUrl,
                             dlBackUrl: userDetails.dlDetails?.dlBackUrl,
-                            companyName: userDetails.companyName
+                            companyName: userDetails.companyName,
+                            assignmentStatus: userDetails.assignmentStatus || 'UNASSIGNED'
                         };
                     }
                 } catch (error) {
                     console.error('Error fetching user details:', error.message);
                 }
             }
-            
+
             return empObj;
         })
     );
@@ -350,6 +366,18 @@ const terminateEmployment = asyncHandler(async (req, res) => {
         rating
     });
 
+    // Get driver user details for notification
+    const driverUser = await getUserById(employment.driverId);
+    const driverName = driverUser ? `${driverUser.firstName || ''} ${driverUser.lastName || ''}`.trim() || 'Driver' : 'Driver';
+
+    // Create notifications for both company and driver
+    await NotificationClient.notifyContractTerminated(
+        [companyId, employment.driverId],
+        driverName,
+        reason,
+        employment._id
+    );
+
     res.json({
         success: true,
         message: 'Employment terminated successfully',
@@ -458,16 +486,267 @@ const addEmploymentNote = asyncHandler(async (req, res) => {
     });
 });
 
+/**
+ * @desc    Update driver assignment status (UNASSIGNED/ASSIGNED)
+ * @route   PATCH /api/employment/driver/:driverId/assignment-status
+ * @access  Internal (service-to-service)
+ */
+const updateDriverAssignmentStatus = asyncHandler(async (req, res) => {
+    const { driverId } = req.params;
+    const { assignmentStatus } = req.body;
+
+    // Validate assignment status
+    if (!['UNASSIGNED', 'ASSIGNED'].includes(assignmentStatus)) {
+        throw new ValidationError('Invalid assignment status. Must be UNASSIGNED or ASSIGNED');
+    }
+
+    // Find active employment for driver
+    const employment = await Employment.findOne({
+        driverId,
+        status: 'ACTIVE'
+    });
+
+    if (!employment) {
+        throw new NotFoundError('Active employment record for driver');
+    }
+
+    // Update assignment status
+    employment.assignmentStatus = assignmentStatus;
+    await employment.save();
+
+    res.json({
+        success: true,
+        message: 'Driver assignment status updated successfully',
+        data: {
+            driverId,
+            employmentId: employment._id,
+            assignmentStatus: employment.assignmentStatus
+        }
+    });
+});
+
+/**
+ * @desc    Get available drivers (not in active trips)
+ * @route   GET /api/drivers/employments/available
+ * @access  Company only
+ */
+const getAvailableDrivers = asyncHandler(async (req, res) => {
+    const companyId = req.user.userId;
+    const { startDateTime, endDateTime } = req.query;
+
+    // Get all active employments for this company
+    const employments = await Employment.find({
+        companyId,
+        status: 'ACTIVE'
+    });
+
+    // Fetch trip data from trip-service to check availability
+    let busyDriverIds = [];
+    try {
+        const tripServiceUrl = process.env.TRIP_SERVICE_URL || 'http://trip-service:5004';
+        const tripResponse = await axios.get(`${tripServiceUrl}/api/trips`, {
+            headers: { 'x-user-id': companyId }
+        });
+
+        const activeTrips = tripResponse.data.trips || [];
+
+        // Filter trips that are scheduled or in-progress
+        const relevantTrips = activeTrips.filter(trip =>
+            trip.status === 'scheduled' || trip.status === 'in-progress'
+        );
+
+        // If date range is provided, check for overlaps
+        if (startDateTime && endDateTime) {
+            const requestStart = new Date(startDateTime);
+            const requestEnd = new Date(endDateTime);
+
+            busyDriverIds = relevantTrips
+                .filter(trip => {
+                    if (!trip.driverId) return false;
+
+                    const tripStart = new Date(trip.startDateTime);
+                    const tripEnd = new Date(trip.endDateTime);
+
+                    // Check if trips overlap
+                    return (
+                        (requestStart <= tripEnd && requestEnd >= tripStart) ||
+                        (tripStart <= requestEnd && tripEnd >= requestStart)
+                    );
+                })
+                .map(trip => trip.driverId.toString());
+        } else {
+            // No date range provided, just check if driver has any active trip
+            busyDriverIds = relevantTrips
+                .filter(trip => trip.driverId)
+                .map(trip => trip.driverId.toString());
+        }
+    } catch (error) {
+        console.error('Error fetching trip data:', error.message);
+        // Continue without trip filtering if service is unavailable
+    }
+
+    // Fetch user details and filter out busy drivers
+    const availableEmployments = await Promise.all(
+        employments.map(async (employment) => {
+            const empObj = employment.toObject();
+            const driverIdStr = empObj.driverId.toString();
+
+            // Skip drivers who are busy
+            if (busyDriverIds.includes(driverIdStr)) {
+                return null;
+            }
+
+            empObj.driverDetails = null;
+
+            try {
+                const userDetails = await getUserById(empObj.driverId);
+
+                if (userDetails) {
+                    empObj.driverDetails = {
+                        firstName: userDetails.firstName,
+                        lastName: userDetails.lastName,
+                        email: userDetails.email,
+                        profileImage: userDetails.profileImage,
+                        phone: userDetails.phone,
+                        assignmentStatus: userDetails.assignmentStatus || 'UNASSIGNED'
+                    };
+
+                    // Keep driverId as string ObjectId, not as nested object
+                    // This is important for frontend to properly use it
+                    empObj.driverId = empObj.driverId.toString();
+                }
+            } catch (error) {
+                console.error('Error fetching user details:', error.message);
+            }
+
+            return empObj;
+        })
+    );
+
+    // Filter out null entries (busy drivers)
+    const filteredEmployments = availableEmployments.filter(emp => emp !== null);
+
+    res.json({
+        success: true,
+        data: {
+            employments: filteredEmployments,
+            total: filteredEmployments.length
+        }
+    });
+});
+
+/**
+ * @desc    Get assigned vehicle for driver
+ * @route   GET /api/drivers/employments/my-vehicle
+ * @access  Driver only
+ */
+const getMyAssignedVehicle = asyncHandler(async (req, res) => {
+    const driverId = req.user.userId;
+
+    // Find active employment for driver
+    const employment = await Employment.findOne({
+        driverId,
+        status: 'ACTIVE'
+    });
+
+    if (!employment) {
+        return res.json({
+            success: true,
+            data: null,
+            message: 'No active employment found'
+        });
+    }
+
+    // Check if vehicle is assigned
+    if (!employment.assignedVehicle || !employment.assignedVehicle.vehicleId) {
+        return res.json({
+            success: true,
+            data: null,
+            message: 'No vehicle assigned'
+        });
+    }
+
+    const vehicleId = employment.assignedVehicle.vehicleId;
+
+    try {
+        // Fetch vehicle details from vehicle-service
+        const vehicleServiceUrl = process.env.VEHICLE_SERVICE_URL || 'http://localhost:5002';
+        const vehicleResponse = await axios.get(
+            `${vehicleServiceUrl}/api/vehicles/${vehicleId}`,
+            {
+                headers: {
+                    'x-auth-token': req.headers['x-auth-token'],
+                    'x-user-id': employment.companyId.toString() // Use company ID for vehicle access
+                }
+            }
+        );
+
+        const vehicle = vehicleResponse.data;
+
+        // Fetch trips from trip-service for this vehicle
+        let trips = [];
+        try {
+            const tripServiceUrl = process.env.TRIP_SERVICE_URL || 'http://localhost:5004';
+            const tripResponse = await axios.get(
+                `${tripServiceUrl}/api/trips?vehicleId=${vehicleId}`,
+                {
+                    headers: {
+                        'x-user-id': employment.companyId.toString()
+                    }
+                }
+            );
+
+            // Filter trips for this driver and sort by start date (most recent first)
+            trips = (tripResponse.data.trips || [])
+                .filter(trip => trip.driverId && trip.driverId.toString() === driverId.toString())
+                .sort((a, b) => new Date(b.startDateTime) - new Date(a.startDateTime));
+        } catch (tripError) {
+            console.error('Error fetching trips:', tripError.message);
+            // Continue without trips if service is unavailable
+        }
+
+        res.json({
+            success: true,
+            data: {
+                vehicle: vehicle,
+                assignment: {
+                    assignedOn: employment.assignedVehicle.assignedOn,
+                    notes: employment.assignedVehicle.notes
+                },
+                employment: {
+                    position: employment.position,
+                    startDate: employment.startDate,
+                    companyId: employment.companyId
+                },
+                trips: trips,
+                tripStats: {
+                    total: trips.length,
+                    scheduled: trips.filter(t => t.status === 'scheduled').length,
+                    inProgress: trips.filter(t => t.status === 'in-progress').length,
+                    completed: trips.filter(t => t.status === 'completed').length,
+                    cancelled: trips.filter(t => t.status === 'cancelled').length
+                }
+            }
+        });
+    } catch (error) {
+        console.error('Error fetching vehicle details:', error.message);
+        throw new Error('Failed to fetch vehicle details');
+    }
+});
+
 module.exports = {
     // createEmployment, // Disabled - use job request flow
     getEmploymentById,
     getCompanyEmployees,
     getDriverEmploymentHistory,
     getCurrentEmployment,
-    // updateEmployment, // Disabled - employments are immutable
-    // assignVehicle, // Removed - not in simplified schema
-    // unassignVehicle, // Removed - not in simplified schema
+    updateEmployment,
+    assignVehicle,
+    unassignVehicle,
     terminateEmployment,
-    resignFromEmployment
+    resignFromEmployment,
+    updateDriverAssignmentStatus,
+    getAvailableDrivers,
+    getMyAssignedVehicle
     // addEmploymentNote // Removed - not in simplified schema
 };

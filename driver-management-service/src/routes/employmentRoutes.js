@@ -2,16 +2,21 @@ const express = require('express');
 const router = express.Router();
 
 const { authMiddleware, requireDriver, requireCompany } = require('../middleware/authMiddleware');
-const { 
-    terminateEmploymentValidation 
+const {
+    terminateEmploymentValidation
 } = require('../middleware/validationMiddleware');
 const {
     getEmploymentById,
     getCompanyEmployees,
     getDriverEmploymentHistory,
     getCurrentEmployment,
+    assignVehicle,
+    unassignVehicle,
     terminateEmployment,
-    resignFromEmployment
+    resignFromEmployment,
+    updateDriverAssignmentStatus,
+    getAvailableDrivers,
+    getMyAssignedVehicle
 } = require('../controllers/employmentController');
 
 /**
@@ -24,14 +29,26 @@ const {
 
 // ===== Company-only routes =====
 
+// Get available drivers (not in active trips)
+router.get('/available', authMiddleware, requireCompany, getAvailableDrivers);
+
 // Get company's employees
 router.get('/company', authMiddleware, requireCompany, getCompanyEmployees);
+
+// Assign vehicle to employee
+router.post('/:employmentId/assign-vehicle', authMiddleware, requireCompany, assignVehicle);
+
+// Unassign vehicle from employee
+router.post('/:employmentId/unassign-vehicle', authMiddleware, requireCompany, unassignVehicle);
 
 // Terminate employment
 router.post('/:employmentId/terminate', authMiddleware, requireCompany, terminateEmploymentValidation, terminateEmployment);
 
 
 // ===== Driver-only routes =====
+
+// Get driver's assigned vehicle
+router.get('/my-vehicle', authMiddleware, requireDriver, getMyAssignedVehicle);
 
 // Get driver's employment history
 router.get('/history', authMiddleware, requireDriver, getDriverEmploymentHistory);
@@ -47,6 +64,12 @@ router.post('/:employmentId/resign', authMiddleware, requireDriver, resignFromEm
 
 // Get employment by ID
 router.get('/:employmentId', authMiddleware, getEmploymentById);
+
+
+// ===== Internal routes (service-to-service) =====
+
+// Update driver assignment status (UNASSIGNED/ASSIGNED)
+router.patch('/driver/:driverId/assignment-status', updateDriverAssignmentStatus);
 
 
 module.exports = router;

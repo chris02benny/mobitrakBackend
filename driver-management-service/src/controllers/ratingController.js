@@ -1,4 +1,5 @@
 const DriverRating = require('../models/DriverRating');
+const DriverProfile = require('../models/DriverProfile');
 const Employment = require('../models/Employment');
 const driverEventEmitter = require('../config/eventEmitter');
 const { asyncHandler, NotFoundError, ValidationError, ForbiddenError, ConflictError } = require('../middleware/errorHandler');
@@ -55,13 +56,17 @@ const createRating = asyncHandler(async (req, res) => {
         }
     }
 
+    // Determine rater role based on user role
+    const raterRole = req.user.role === 'fleetmanager' ? 'FLEET_MANAGER' : 
+                      req.user.role === 'admin' ? 'COMPANY' : 'COMPANY';
+
     // Create rating
     const rating = new DriverRating({
         driverId: driverId,
         ratedBy: {
             userId,
             companyId: userId,
-            role: 'COMPANY'
+            role: raterRole
         },
         employmentId,
         overallRating,
@@ -75,6 +80,9 @@ const createRating = asyncHandler(async (req, res) => {
     });
 
     await rating.save();
+
+    // Calculate updated aggregate ratings
+    const aggregateRatings = await DriverRating.calculateAggregateRatings(driverId);
 
     // Emit event
     driverEventEmitter.emitDriverRatingAdded({

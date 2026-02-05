@@ -4,6 +4,7 @@ const cors = require('cors');
 const connectDB = require('./src/config/db');
 const vehicleRoutes = require('./src/routes/vehicleRoutes');
 const adminVehicleRoutes = require('./src/routes/adminVehicleRoutes');
+const trackingDeviceRoutes = require('./src/routes/trackingDeviceRoutes');
 
 dotenv.config();
 
@@ -21,6 +22,7 @@ app.use('/uploads', express.static('uploads'));
 // Routes
 app.use('/api/vehicles', vehicleRoutes);
 app.use('/api/vehicles/admin', adminVehicleRoutes);
+app.use('/api/tracking-device', trackingDeviceRoutes);
 
 const PORT = process.env.PORT || 5002;
 
