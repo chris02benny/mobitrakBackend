@@ -10,8 +10,8 @@ const vehicleSchema = new mongoose.Schema({
     registrationNumber: { type: String }, // Alias for regnNo for frontend compatibility
     make: { type: String }, // Vehicle manufacturer
     model: { type: String }, // Vehicle model
-    vehicleType: { 
-        type: String, 
+    vehicleType: {
+        type: String,
         enum: ['goods', 'passenger'],
         default: 'goods'
     }, // Type of vehicle for trip filtering
@@ -35,7 +35,7 @@ const vehicleSchema = new mongoose.Schema({
     description: { type: String },
     status: {
         type: String,
-        enum: ['IDLE', 'ASSIGNED'],
+        enum: ['IDLE', 'ASSIGNED', 'MAINTENANCE'],
         default: 'IDLE'
     }, // Vehicle assignment status
     createdAt: {

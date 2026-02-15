@@ -3,6 +3,22 @@ const LiveTrackingDevice = require('../models/LiveTrackingDevice');
 const { extractTextFromImage } = require('../services/ocrSpace.service');
 const { extractRCFieldsWithAI } = require('../services/aiExtraction.service');
 const NotificationClient = require('../services/notificationClient');
+const axios = require('axios');
+
+// Helper to check if vehicle has active trips
+const checkTripAvailability = async (vehicleId) => {
+    try {
+        const tripServiceUrl = process.env.TRIP_SERVICE_URL || 'http://trip-service:5004';
+        const url = `${tripServiceUrl}/api/trips/check-availability?vehicleId=${vehicleId}`;
+
+        const response = await axios.get(url);
+        return response.data;
+    } catch (error) {
+        console.error('Error checking trip availability:', error.message);
+        // Default to available if service is down, but log the error
+        return { available: true };
+    }
+};
 
 /**
  * Parse raw OCR text into structured vehicle data
@@ -254,13 +270,13 @@ exports.createVehicle = async (req, res) => {
 exports.getVehicles = async (req, res) => {
     try {
         const vehicles = await Vehicle.find({ businessId: req.user.id }).sort({ createdAt: -1 });
-        
+
         // Get tracking device info for all vehicles
         const vehicleIds = vehicles.map(v => v._id);
-        const trackingDevices = await LiveTrackingDevice.find({ 
-            vehicleId: { $in: vehicleIds } 
+        const trackingDevices = await LiveTrackingDevice.find({
+            vehicleId: { $in: vehicleIds }
         }).select('vehicleId isActive');
-        
+
         // Create a map for quick lookup
         const trackingMap = {};
         trackingDevices.forEach(device => {
@@ -269,7 +285,7 @@ exports.getVehicles = async (req, res) => {
                 isActive: device.isActive
             };
         });
-        
+
         // Add tracking info to vehicles
         const vehiclesWithTracking = vehicles.map(vehicle => {
             const vehicleObj = vehicle.toObject();
@@ -280,7 +296,7 @@ exports.getVehicles = async (req, res) => {
                 trackingActive: tracking?.isActive || false
             };
         });
-        
+
         res.json(vehiclesWithTracking);
     } catch (error) {
         console.error('Error in getVehicles:', error);
@@ -340,6 +356,14 @@ exports.updateVehicle = async (req, res) => {
             make: req.body.make || req.body.makersName || vehicle.make,
         };
 
+        // Check if status is being changed to MAINTENANCE
+        if (req.body.status === 'MAINTENANCE' && vehicle.status !== 'MAINTENANCE') {
+            const availability = await checkTripAvailability(vehicleId);
+            if (!availability.available) {
+                return res.status(400).json({ message: 'Vehicle cannot be put under maintenance while assigned to an active trip' });
+            }
+        }
+
         // Update vehicle
         const updatedVehicle = await Vehicle.findByIdAndUpdate(
             vehicleId,
@@ -386,6 +410,12 @@ exports.deleteVehicle = async (req, res) => {
         // Check if user owns this vehicle
         if (vehicle.businessId.toString() !== req.user.id) {
             return res.status(403).json({ message: 'Not authorized to delete this vehicle' });
+        }
+
+        // Requirement: Vehicle cannot be removed if assigned to a trip
+        const availability = await checkTripAvailability(vehicleId);
+        if (!availability.available) {
+            return res.status(400).json({ message: 'Vehicle cannot be removed while assigned to an active trip' });
         }
 
         await Vehicle.findByIdAndDelete(vehicleId);
@@ -443,16 +473,15 @@ exports.getAvailableVehicles = async (req, res) => {
         // Fetch trip data to check availability
         let busyVehicleIds = [];
         try {
-            const axios = require('axios');
             const tripServiceUrl = process.env.TRIP_SERVICE_URL || 'http://trip-service:5004';
             const tripResponse = await axios.get(`${tripServiceUrl}/api/trips`, {
                 headers: { 'x-user-id': businessId }
             });
 
             const activeTrips = tripResponse.data.trips || [];
-            
+
             // Filter trips that are scheduled or in-progress
-            const relevantTrips = activeTrips.filter(trip => 
+            const relevantTrips = activeTrips.filter(trip =>
                 trip.status === 'scheduled' || trip.status === 'in-progress'
             );
 
@@ -483,7 +512,7 @@ exports.getAvailableVehicles = async (req, res) => {
         }
 
         // Filter out busy vehicles
-        const availableVehicles = allVehicles.filter(vehicle => 
+        const availableVehicles = allVehicles.filter(vehicle =>
             !busyVehicleIds.includes(vehicle._id.toString())
         );
 

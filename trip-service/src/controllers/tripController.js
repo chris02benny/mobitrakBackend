@@ -57,22 +57,25 @@ exports.createTrip = async (req, res) => {
         }
 
         // Check for overlapping trips with the same vehicle
+        // Requirement: Vehicle cannot be assigned to another trip in the same date
+        const startDay = new Date(start);
+        startDay.setHours(0, 0, 0, 0);
+        const endDay = new Date(end);
+        endDay.setHours(23, 59, 59, 999);
+
         const vehicleOverlap = await Trip.findOne({
             vehicleId,
             status: { $in: ['scheduled', 'in-progress'] },
             $or: [
-                // New trip starts during existing trip
-                { startDateTime: { $lte: start }, endDateTime: { $gte: start } },
-                // New trip ends during existing trip
-                { startDateTime: { $lte: end }, endDateTime: { $gte: end } },
-                // New trip completely contains existing trip
-                { startDateTime: { $gte: start }, endDateTime: { $lte: end } }
+                { startDateTime: { $gte: startDay, $lte: endDay } },
+                { endDateTime: { $gte: startDay, $lte: endDay } },
+                { startDateTime: { $lte: startDay }, endDateTime: { $gte: endDay } }
             ]
         });
 
         if (vehicleOverlap) {
-            return res.status(400).json({ 
-                message: 'Vehicle is already assigned to another trip during these dates',
+            return res.status(400).json({
+                message: 'Vehicle is already assigned to another trip on the same date',
                 conflictingTrip: vehicleOverlap._id
             });
         }
@@ -93,7 +96,7 @@ exports.createTrip = async (req, res) => {
             });
 
             if (driverOverlap) {
-                return res.status(400).json({ 
+                return res.status(400).json({
                     message: 'Driver is already assigned to another trip during these dates',
                     conflictingTrip: driverOverlap._id
                 });
@@ -237,7 +240,7 @@ exports.createTrip = async (req, res) => {
 exports.getTrips = async (req, res) => {
     try {
         const { status, vehicleId, startDate, endDate } = req.query;
-        
+
         const query = { fleetManagerId: req.user.id };
 
         if (status) {
@@ -310,9 +313,42 @@ exports.updateTrip = async (req, res) => {
 
         // Don't allow updating completed trips unless changing to completed/cancelled
         if (previousStatus === 'completed' && req.body.status !== 'completed') {
-            return res.status(400).json({ 
-                message: 'Cannot update completed trip' 
+            return res.status(400).json({
+                message: 'Cannot update completed trip'
             });
+        }
+
+        // Check for overlapping trips with the same vehicle if vehicleId or dates changed
+        if (req.body.vehicleId || req.body.startDateTime || req.body.endDateTime) {
+            const vehicleId = req.body.vehicleId || trip.vehicleId;
+            const startStr = req.body.startDateTime || trip.startDateTime;
+            const endStr = req.body.endDateTime || trip.endDateTime;
+
+            const start = new Date(startStr);
+            const end = new Date(endStr);
+
+            const startDay = new Date(start);
+            startDay.setHours(0, 0, 0, 0);
+            const endDay = new Date(end);
+            endDay.setHours(23, 59, 59, 999);
+
+            const vehicleOverlap = await Trip.findOne({
+                _id: { $ne: req.params.id },
+                vehicleId,
+                status: { $in: ['scheduled', 'in-progress'] },
+                $or: [
+                    { startDateTime: { $gte: startDay, $lte: endDay } },
+                    { endDateTime: { $gte: startDay, $lte: endDay } },
+                    { startDateTime: { $lte: startDay }, endDateTime: { $gte: endDay } }
+                ]
+            });
+
+            if (vehicleOverlap) {
+                return res.status(400).json({
+                    message: 'Vehicle is already assigned to another trip on the same date',
+                    conflictingTrip: vehicleOverlap._id
+                });
+            }
         }
 
         // Update allowed fields
@@ -329,10 +365,10 @@ exports.updateTrip = async (req, res) => {
         });
 
         // Recalculate route if stops, destinations, or pricing changed
-        if (req.body.stops || req.body.startDestination || req.body.endDestination || 
-            req.body.amountPerKm !== undefined || req.body.vehicleRent !== undefined || 
+        if (req.body.stops || req.body.startDestination || req.body.endDestination ||
+            req.body.amountPerKm !== undefined || req.body.vehicleRent !== undefined ||
             req.body.isTwoWay !== undefined) {
-            
+
             const coordinates = [
                 trip.startDestination.location.coordinates,
                 ...(trip.stops || []).map(stop => stop.location.coordinates),
@@ -344,19 +380,19 @@ exports.updateTrip = async (req, res) => {
                 trip.route = routeData.geometry;
                 let distance = routeData.distance;
                 let duration = routeData.duration;
-                
+
                 // Apply two-way multiplier if needed
                 if (trip.isTwoWay) {
                     distance = distance * 2;
                     duration = duration * 2;
                 }
-                
+
                 trip.distance = distance;
                 trip.duration = duration;
-                
+
                 // Recalculate amount with updated pricing
                 trip.amount = (distance * trip.amountPerKm) + trip.vehicleRent;
-                
+
                 trip.suggestedStops = mapboxService.suggestRestStops(trip.route, trip.distance);
             } catch (error) {
                 console.error('Route recalculation error:', error);
@@ -366,9 +402,9 @@ exports.updateTrip = async (req, res) => {
         await trip.save();
 
         // If status changed to completed or cancelled, reset vehicle and driver statuses
-        if (req.body.status && ['completed', 'cancelled'].includes(req.body.status) && 
+        if (req.body.status && ['completed', 'cancelled'].includes(req.body.status) &&
             previousStatus !== req.body.status) {
-            
+
             // Reset vehicle status to IDLE
             try {
                 await axios.patch(
@@ -454,8 +490,8 @@ exports.deleteTrip = async (req, res) => {
 
         // Only allow deleting scheduled trips
         if (trip.status !== 'scheduled') {
-            return res.status(400).json({ 
-                message: 'Cannot delete trip that is in progress or completed' 
+            return res.status(400).json({
+                message: 'Cannot delete trip that is in progress or completed'
             });
         }
 
@@ -525,14 +561,14 @@ exports.calculateRoute = async (req, res) => {
         const { coordinates, tripType } = req.body;
 
         if (!coordinates || coordinates.length < 2) {
-            return res.status(400).json({ 
-                message: 'At least start and end coordinates are required' 
+            return res.status(400).json({
+                message: 'At least start and end coordinates are required'
             });
         }
 
         const routeData = await mapboxService.getRoute(coordinates);
         const suggestedStops = mapboxService.suggestRestStops(
-            routeData.geometry, 
+            routeData.geometry,
             routeData.distance
         );
         const amount = mapboxService.calculateAmount(routeData.distance, tripType);
@@ -609,9 +645,9 @@ exports.getActiveTripsWithLocations = async (req, res) => {
             fleetManagerId: req.user.id,
             status: 'in-progress'
         })
-        .select('vehicleId driverId currentLocation lastLocationUpdate startDestination endDestination')
-        .populate('vehicleId', 'regnNo vehicleType')
-        .populate('driverId', 'fullName email');
+            .select('vehicleId driverId currentLocation lastLocationUpdate startDestination endDestination')
+            .populate('vehicleId', 'regnNo vehicleType')
+            .populate('driverId', 'fullName email');
 
         res.json({ trips });
     } catch (error) {
@@ -626,25 +662,25 @@ exports.getDriverAssignedTrips = async (req, res) => {
         console.log('getDriverAssignedTrips called');
         console.log('Driver ID from token:', req.user.id);
         console.log('User role:', req.user.role);
-        
+
         // Convert to string for comparison (in case it's stored differently)
         const driverId = req.user.id.toString();
-        
+
         // First, let's see all trips to debug
         const allTrips = await Trip.find({}).select('driverId status').limit(10);
-        console.log('Sample trips in DB:', allTrips.map(t => ({ 
-            id: t._id, 
-            driverId: t.driverId?.toString(), 
-            status: t.status 
+        console.log('Sample trips in DB:', allTrips.map(t => ({
+            id: t._id,
+            driverId: t.driverId?.toString(),
+            status: t.status
         })));
-        
+
         // Get trips assigned to this driver
         const trips = await Trip.find({
             driverId: req.user.id,
             status: { $in: ['scheduled', 'in-progress'] }
         })
-        .select('-amountPerKm -vehicleRent -amount') // Exclude pricing details
-        .sort({ startDateTime: 1 }); // Sort by start date (upcoming first)
+            .select('-amountPerKm -vehicleRent -amount') // Exclude pricing details
+            .sort({ startDateTime: 1 }); // Sort by start date (upcoming first)
 
         console.log('Found trips count:', trips.length);
         if (trips.length > 0) {
@@ -662,9 +698,9 @@ exports.getDriverAssignedTrips = async (req, res) => {
 exports.startTrip = async (req, res) => {
     try {
         const { id } = req.params;
-        
+
         const trip = await Trip.findById(id);
-        
+
         if (!trip) {
             return res.status(404).json({ message: 'Trip not found' });
         }
@@ -689,12 +725,12 @@ exports.startTrip = async (req, res) => {
             const hours = Math.floor(Math.abs(diffMinutes) / 60);
             const minutes = Math.floor(Math.abs(diffMinutes) % 60);
             if (diffMinutes > 0) {
-                return res.status(400).json({ 
-                    message: `Trip cannot be started yet. It is scheduled to start in ${hours}h ${minutes}m. You can only start the trip within 3 hours of the scheduled start time.` 
+                return res.status(400).json({
+                    message: `Trip cannot be started yet. It is scheduled to start in ${hours}h ${minutes}m. You can only start the trip within 3 hours of the scheduled start time.`
                 });
             } else {
-                return res.status(400).json({ 
-                    message: `Trip cannot be started. It was scheduled to start ${hours}h ${minutes}m ago. You can only start the trip within 3 hours of the scheduled start time.` 
+                return res.status(400).json({
+                    message: `Trip cannot be started. It was scheduled to start ${hours}h ${minutes}m ago. You can only start the trip within 3 hours of the scheduled start time.`
                 });
             }
         }
@@ -702,11 +738,11 @@ exports.startTrip = async (req, res) => {
         // Update trip status
         trip.status = 'in-progress';
         trip.actualStartDateTime = new Date();
-        
+
         await trip.save();
 
-        res.json({ 
-            message: 'Trip started successfully', 
+        res.json({
+            message: 'Trip started successfully',
             trip: {
                 ...trip.toObject(),
                 amountPerKm: undefined,
@@ -725,9 +761,9 @@ exports.updateStopStatus = async (req, res) => {
     try {
         const { id, stopIndex } = req.params;
         const { location } = req.body;
-        
+
         const trip = await Trip.findById(id);
-        
+
         if (!trip) {
             return res.status(404).json({ message: 'Trip not found' });
         }
@@ -751,7 +787,7 @@ exports.updateStopStatus = async (req, res) => {
         // Update stop status
         trip.stops[stopIndexNum].status = 'reached';
         trip.stops[stopIndexNum].arrivedAt = new Date();
-        
+
         // Update vehicle location if provided
         if (location && location.coordinates) {
             trip.currentLocation = location;
@@ -759,8 +795,8 @@ exports.updateStopStatus = async (req, res) => {
 
         await trip.save();
 
-        res.json({ 
-            message: 'Stop status updated successfully', 
+        res.json({
+            message: 'Stop status updated successfully',
             trip: {
                 ...trip.toObject(),
                 amountPerKm: undefined,
@@ -778,9 +814,9 @@ exports.updateStopStatus = async (req, res) => {
 exports.endTrip = async (req, res) => {
     try {
         const { id } = req.params;
-        
+
         const trip = await Trip.findById(id);
-        
+
         if (!trip) {
             return res.status(404).json({ message: 'Trip not found' });
         }
@@ -801,8 +837,8 @@ exports.endTrip = async (req, res) => {
 
         await trip.save();
 
-        res.json({ 
-            message: 'Trip completed successfully', 
+        res.json({
+            message: 'Trip ended successfully',
             trip: {
                 ...trip.toObject(),
                 amountPerKm: undefined,
@@ -812,6 +848,89 @@ exports.endTrip = async (req, res) => {
         });
     } catch (error) {
         console.error('End trip error:', error);
+        res.status(500).json({ message: 'Server error', error: error.message });
+    }
+};
+
+// Check availability of driver or vehicle
+exports.checkAvailability = async (req, res) => {
+    try {
+        const { driverId, vehicleId } = req.query;
+
+        if (!driverId && !vehicleId) {
+            return res.status(400).json({ message: 'Either driverId or vehicleId is required' });
+        }
+
+        const query = {
+            status: { $in: ['scheduled', 'in-progress'] }
+        };
+
+        if (driverId) {
+            query.driverId = driverId;
+        }
+
+        if (vehicleId) {
+            query.vehicleId = vehicleId;
+        }
+
+        const activeTrip = await Trip.findOne(query);
+
+        res.json({
+            available: !activeTrip,
+            activeTrip: activeTrip ? {
+                _id: activeTrip._id,
+                status: activeTrip.status,
+                startDateTime: activeTrip.startDateTime,
+                endDateTime: activeTrip.endDateTime
+            } : null
+        });
+    } catch (error) {
+        console.error('Check availability error:', error);
+        res.status(500).json({ message: 'Server error', error: error.message });
+    }
+};
+
+// Get busy date ranges for a driver or vehicle
+exports.getBusyDates = async (req, res) => {
+    try {
+        const { driverId, vehicleId } = req.query;
+
+        if (!driverId && !vehicleId) {
+            return res.status(400).json({ message: 'Either driverId or vehicleId is required' });
+        }
+
+        const query = {
+            status: { $in: ['scheduled', 'in-progress'] }
+        };
+
+        if (driverId) {
+            query.driverId = driverId;
+        }
+
+        if (vehicleId) {
+            query.vehicleId = vehicleId;
+        }
+
+        // Find all active trips for the driver or vehicle
+        const trips = await Trip.find(query)
+            .select('startDateTime endDateTime status _id')
+            .sort({ startDateTime: 1 });
+
+        // Format the busy date ranges
+        const busyDates = trips.map(trip => ({
+            tripId: trip._id,
+            startDate: trip.startDateTime,
+            endDate: trip.endDateTime,
+            status: trip.status
+        }));
+
+        res.json({
+            success: true,
+            busyDates,
+            count: busyDates.length
+        });
+    } catch (error) {
+        console.error('Get busy dates error:', error);
         res.status(500).json({ message: 'Server error', error: error.message });
     }
 };

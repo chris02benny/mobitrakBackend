@@ -15,6 +15,24 @@ const getUserById = async (userId) => {
     }
 };
 
+// Helper to check if driver or vehicle has active trips
+const checkTripAvailability = async (driverId = null, vehicleId = null) => {
+    try {
+        const tripServiceUrl = process.env.TRIP_SERVICE_URL || 'http://trip-service:5004';
+        let url = `${tripServiceUrl}/api/trips/check-availability?`;
+        if (driverId) url += `driverId=${driverId}&`;
+        if (vehicleId) url += `vehicleId=${vehicleId}`;
+
+        const response = await axios.get(url);
+        return response.data;
+    } catch (error) {
+        console.error('Error checking trip availability:', error.message);
+        // If trip service is unavailable, we default to available to avoid complete lockout,
+        // but log the error. In a production system, this policy might differ.
+        return { available: true };
+    }
+};
+
 /**
  * Employment Controller
  * 
@@ -326,6 +344,12 @@ const terminateEmployment = asyncHandler(async (req, res) => {
         throw new ValidationError('Employment is already terminated');
     }
 
+    // Requirement: Driver cannot be terminated if assigned to a trip
+    const availability = await checkTripAvailability(employment.driverId);
+    if (!availability.available) {
+        throw new ValidationError('Driver cannot be terminated while assigned to an active trip');
+    }
+
     // Set termination details
     employment.status = 'TERMINATED';
     employment.endDate = new Date();
@@ -406,6 +430,12 @@ const resignFromEmployment = asyncHandler(async (req, res) => {
 
     if (!['ACTIVE'].includes(employment.status)) {
         throw new ValidationError('Cannot resign from this employment');
+    }
+
+    // Requirement: Driver cannot resign if assigned to a trip
+    const availability = await checkTripAvailability(userId);
+    if (!availability.available) {
+        throw new ValidationError('You cannot resign while assigned to an active trip');
     }
 
     // Set resignation details
@@ -740,9 +770,9 @@ module.exports = {
     getCompanyEmployees,
     getDriverEmploymentHistory,
     getCurrentEmployment,
-    updateEmployment,
-    assignVehicle,
-    unassignVehicle,
+    // updateEmployment, // Disabled - employments are immutable
+    // assignVehicle, // Removed - not in simplified schema
+    // unassignVehicle, // Removed - not in simplified schema
     terminateEmployment,
     resignFromEmployment,
     updateDriverAssignmentStatus,

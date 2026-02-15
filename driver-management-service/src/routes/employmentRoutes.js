@@ -2,16 +2,14 @@ const express = require('express');
 const router = express.Router();
 
 const { authMiddleware, requireDriver, requireCompany } = require('../middleware/authMiddleware');
-const {
-    terminateEmploymentValidation
+const { 
+    terminateEmploymentValidation 
 } = require('../middleware/validationMiddleware');
 const {
     getEmploymentById,
     getCompanyEmployees,
     getDriverEmploymentHistory,
     getCurrentEmployment,
-    assignVehicle,
-    unassignVehicle,
     terminateEmployment,
     resignFromEmployment,
     updateDriverAssignmentStatus,
@@ -34,12 +32,6 @@ router.get('/available', authMiddleware, requireCompany, getAvailableDrivers);
 
 // Get company's employees
 router.get('/company', authMiddleware, requireCompany, getCompanyEmployees);
-
-// Assign vehicle to employee
-router.post('/:employmentId/assign-vehicle', authMiddleware, requireCompany, assignVehicle);
-
-// Unassign vehicle from employee
-router.post('/:employmentId/unassign-vehicle', authMiddleware, requireCompany, unassignVehicle);
 
 // Terminate employment
 router.post('/:employmentId/terminate', authMiddleware, requireCompany, terminateEmploymentValidation, terminateEmployment);
