@@ -3,7 +3,7 @@ name: Deploy MobiTrak Backend to AWS Lambda
 on:
   push:
     branches:
-      - main
+      - master
 
 jobs:
   deploy:
