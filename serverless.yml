@@ -18,7 +18,12 @@ provider:
   # API Gateway intercepts preflight OPTIONS requests BEFORE they reach Lambda,
   # so Express cors() middleware alone is insufficient. Both layers are needed:
   #   - API Gateway handles the OPTIONS preflight (configured here)
-  #   - Express cors() sets headers on the actual POST/GET/etc responses
+  #   - Express cors() sets headers on actual POST/GET/etc responses
+  #
+  # IMPORTANT: allowedOrigins below are YAML literals read at deploy time by
+  # CloudFormation — they are NOT resolved from environment variables at runtime.
+  # To change allowed origins, edit this list and redeploy.
+  # The ALLOWED_ORIGINS env var below only affects the Express cors() middleware.
   httpApi:
     payload: '2.0'
     cors:
@@ -37,6 +42,7 @@ provider:
         - DELETE
         - OPTIONS
       allowCredentials: true
+      maxAge: 600
 
   # Environment variables — loaded from process.env / GitHub Secrets / Lambda env
   # DO NOT hardcode values here. Use ${env:VAR_NAME} to read from environment.
@@ -71,6 +77,17 @@ functions:
     handler: user-service/handler.handler
     description: User auth, admin, and notification management
     events:
+      # Explicit routes for commonly-called endpoints (avoids {proxy+} ambiguity)
+      - httpApi:
+          path: /api/users/login
+          method: post
+      - httpApi:
+          path: /api/users/register/fleetmanager
+          method: post
+      - httpApi:
+          path: /api/users/register/driver
+          method: post
+      # Catch-all for all other /api/users/* paths
       - httpApi:
           path: /api/users/{proxy+}
           method: any
