@@ -80,13 +80,13 @@ functions:
       # Explicit routes for commonly-called endpoints (avoids {proxy+} ambiguity)
       - httpApi:
           path: /api/users/login
-          method: post
+          method: any
       - httpApi:
           path: /api/users/register/fleetmanager
-          method: post
+          method: any
       - httpApi:
           path: /api/users/register/driver
-          method: post
+          method: any
       # Catch-all for all other /api/users/* paths
       - httpApi:
           path: /api/users/{proxy+}
@@ -99,7 +99,7 @@ functions:
           method: any
       - httpApi:
           path: /health
-          method: get
+          method: any
 
   # ===== Vehicle Service =====
   vehicleService:
