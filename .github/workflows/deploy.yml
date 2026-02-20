@@ -22,25 +22,25 @@ jobs:
           node-version: '18'
 
       # 3. Install root-level serverless dependencies
+      #    working-directory is the repo root (which IS mobitrak-backend/)
       - name: Install root dependencies
-        working-directory: mobitrak-backend
         run: npm install
 
       # 4. Install per-service dependencies
       - name: Install user-service dependencies
-        working-directory: mobitrak-backend/user-service
+        working-directory: user-service
         run: npm install
 
       - name: Install vehicle-service dependencies
-        working-directory: mobitrak-backend/vehicle-service
+        working-directory: vehicle-service
         run: npm install
 
       - name: Install driver-management-service dependencies
-        working-directory: mobitrak-backend/driver-management-service
+        working-directory: driver-management-service
         run: npm install
 
       - name: Install trip-service dependencies
-        working-directory: mobitrak-backend/trip-service
+        working-directory: trip-service
         run: npm install
 
       # 5. Configure AWS credentials (from GitHub Secrets — never logged)
@@ -52,8 +52,8 @@ jobs:
           aws-region: ap-south-1
 
       # 6. Deploy to AWS Lambda (prod stage)
+      #    Run from repo root — serverless.yml is here
       - name: Deploy to Lambda (prod)
-        working-directory: mobitrak-backend
         run: npx serverless deploy --stage prod --verbose
         env:
           # MongoDB
