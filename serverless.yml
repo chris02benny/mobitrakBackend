@@ -13,22 +13,11 @@ provider:
   stage: ${opt:stage, 'dev'}
   memorySize: 512
   timeout: 10
-  # HTTP API (API Gateway v2) — cheaper and faster than REST API
+  # HTTP API (API Gateway v2)
+  # CORS is handled by Express cors() middleware in each app.js — not here.
+  # Configuring it at API Gateway level conflicts with Express and caused deployment failures.
   httpApi:
-    cors:
-      allowedOrigins:
-        - ${env:FRONTEND_URL, 'http://localhost:5173'}
-      allowedMethods:
-        - GET
-        - POST
-        - PUT
-        - DELETE
-        - OPTIONS
-      allowedHeaders:
-        - Content-Type
-        - Authorization
-        - x-auth-token
-      allowCredentials: true
+    payload: '2.0'
 
   # Environment variables — loaded from process.env / GitHub Secrets / Lambda env
   # DO NOT hardcode values here. Use ${env:VAR_NAME} to read from environment.
