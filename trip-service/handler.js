@@ -5,6 +5,10 @@
  * Wraps the Express app with serverless-http.
  * Handles MongoDB connection caching for Lambda cold-start optimization.
  *
+ * IMPORTANT: DB connection is established BEFORE handing off to serverless-http.
+ * Previously, app.use() was called AFTER serverless(app) — which caused race
+ * conditions on cold starts and resulted in 404s from uninitialized routes.
+ *
  * NOTE on Socket.IO:
  *   Socket.IO will automatically fall back to HTTP long-polling transport
  *   when running under Lambda (true WebSocket requires API Gateway WebSocket APIs).
@@ -19,13 +23,16 @@ const connectDB = require('./src/config/db');
 
 let isConnected = false;
 
-// Middleware to ensure DB is connected before handling any request
-app.use(async (req, res, next) => {
+// Wrap the serverless handler so DB connect is always awaited first.
+// context.callbackWaitsForEmptyEventLoop = false prevents Lambda from hanging
+// on open MongoDB connections between invocations.
+const serverlessHandler = serverless(app);
+
+module.exports.handler = async (event, context) => {
+    context.callbackWaitsForEmptyEventLoop = false;
     if (!isConnected) {
         await connectDB();
         isConnected = true;
     }
-    next();
-});
-
-module.exports.handler = serverless(app);
+    return serverlessHandler(event, context);
+};

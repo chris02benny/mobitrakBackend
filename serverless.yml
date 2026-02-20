@@ -14,10 +14,29 @@ provider:
   memorySize: 512
   timeout: 10
   # HTTP API (API Gateway v2)
-  # CORS is handled by Express cors() middleware in each app.js — not here.
-  # Configuring it at API Gateway level conflicts with Express and caused deployment failures.
+  # CORS must be configured at the API Gateway level for HTTP API (v2).
+  # API Gateway intercepts preflight OPTIONS requests BEFORE they reach Lambda,
+  # so Express cors() middleware alone is insufficient. Both layers are needed:
+  #   - API Gateway handles the OPTIONS preflight (configured here)
+  #   - Express cors() sets headers on the actual POST/GET/etc responses
   httpApi:
     payload: '2.0'
+    cors:
+      allowedOrigins:
+        - 'http://localhost:5173'
+        - 'https://mobitrakapp.vercel.app'
+      allowedHeaders:
+        - Content-Type
+        - Authorization
+        - x-auth-token
+      allowedMethods:
+        - GET
+        - POST
+        - PUT
+        - PATCH
+        - DELETE
+        - OPTIONS
+      allowCredentials: true
 
   # Environment variables — loaded from process.env / GitHub Secrets / Lambda env
   # DO NOT hardcode values here. Use ${env:VAR_NAME} to read from environment.
