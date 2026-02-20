@@ -7,7 +7,7 @@ const mongoose = require('mongoose');
  */
 const connectDB = async () => {
     if (mongoose.connection.readyState === 1) {
-        console.log('[vehicle-service] MongoDB already connected — reusing connection.');
+        console.log('[user-service] MongoDB already connected — reusing connection.');
         return;
     }
 
@@ -15,9 +15,9 @@ const connectDB = async () => {
         const conn = await mongoose.connect(process.env.MONGO_URI, {
             serverSelectionTimeoutMS: 5000
         });
-        console.log(`[vehicle-service] MongoDB connected: ${conn.connection.host}`);
+        console.log(`[user-service] MongoDB connected: ${conn.connection.host}`);
     } catch (error) {
-        console.error(`[vehicle-service] MongoDB connection error: ${error.message}`);
+        console.error(`[user-service] MongoDB connection error: ${error.message}`);
         throw error;
     }
 };

@@ -1,27 +1,28 @@
-const express = require('express');
+/**
+ * user-service/server.js
+ * Local development entry point. Starts HTTP server with Socket.IO.
+ * For Lambda deployment, use handler.js instead.
+ */
+
 const http = require('http');
 const socketIO = require('socket.io');
 const mongoose = require('mongoose');
-const cors = require('cors');
 const dotenv = require('dotenv');
-const passport = require('passport');
 
 dotenv.config();
 
-const authRoutes = require('./src/routes/authRoutes');
-const adminRoutes = require('./src/routes/adminRoutes');
-const notificationRoutes = require('./src/routes/notificationRoutes');
+const app = require('./app');
 
-const app = express();
-const server = http.createServer(app);
 const PORT = process.env.PORT || 5001;
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://mongo:27017/mobitrak_users';
+
+const server = http.createServer(app);
 
 // Initialize Socket.IO with CORS
 const io = socketIO(server, {
     cors: {
-        origin: process.env.FRONTEND_URL || "http://localhost:5173",
-        methods: ["GET", "POST", "PUT", "DELETE"],
+        origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+        methods: ['GET', 'POST', 'PUT', 'DELETE'],
         credentials: true
     }
 });
@@ -41,24 +42,6 @@ io.on('connection', (socket) => {
     socket.on('disconnect', () => {
         console.log('Client disconnected from user-service:', socket.id);
     });
-});
-
-// Passport Config
-require('./src/config/passport'); // Added passport config
-
-// Middleware
-app.use(cors());
-app.use(express.json());
-app.use(passport.initialize()); // Added passport initialize
-
-// Routes
-app.use('/api/users', authRoutes);
-app.use('/api/admin', adminRoutes);
-app.use('/api/notifications', notificationRoutes);
-
-// Health Check
-app.get('/', (req, res) => {
-    res.send('User Service is running');
 });
 
 // Database Connection

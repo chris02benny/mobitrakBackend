@@ -1,0 +1,91 @@
+name: Deploy MobiTrak Backend to AWS Lambda
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: Deploy Serverless
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Checkout the repository
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. Setup Node.js 18
+      - name: Setup Node.js 18
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      # 3. Install root-level serverless dependencies
+      - name: Install root dependencies
+        working-directory: mobitrak-backend
+        run: npm install
+
+      # 4. Install per-service dependencies
+      - name: Install user-service dependencies
+        working-directory: mobitrak-backend/user-service
+        run: npm install
+
+      - name: Install vehicle-service dependencies
+        working-directory: mobitrak-backend/vehicle-service
+        run: npm install
+
+      - name: Install driver-management-service dependencies
+        working-directory: mobitrak-backend/driver-management-service
+        run: npm install
+
+      - name: Install trip-service dependencies
+        working-directory: mobitrak-backend/trip-service
+        run: npm install
+
+      # 5. Configure AWS credentials (from GitHub Secrets — never logged)
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-south-1
+
+      # 6. Deploy to AWS Lambda (prod stage)
+      - name: Deploy to Lambda (prod)
+        working-directory: mobitrak-backend
+        run: npx serverless deploy --stage prod --verbose
+        env:
+          # MongoDB
+          MONGO_URI: ${{ secrets.MONGO_URI }}
+          # JWT
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          # SMTP / Email
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          # Cloudinary
+          CLOUDINARY_CLOUD_NAME: ${{ secrets.CLOUDINARY_CLOUD_NAME }}
+          CLOUDINARY_API_KEY: ${{ secrets.CLOUDINARY_API_KEY }}
+          CLOUDINARY_API_SECRET: ${{ secrets.CLOUDINARY_API_SECRET }}
+          # OCR.space
+          OCR_SPACE_API_KEY_USER: ${{ secrets.OCR_SPACE_API_KEY_USER }}
+          OCR_SPACE_API_KEY_VEHICLE: ${{ secrets.OCR_SPACE_API_KEY_VEHICLE }}
+          # OpenRouter AI
+          OPENROUTER_API_KEY_USER: ${{ secrets.OPENROUTER_API_KEY_USER }}
+          OPENROUTER_API_KEY_VEHICLE: ${{ secrets.OPENROUTER_API_KEY_VEHICLE }}
+          AI_API_URL: ${{ secrets.AI_API_URL }}
+          AI_MODEL: ${{ secrets.AI_MODEL }}
+          # Mapbox
+          MAPBOX_ACCESS_TOKEN: ${{ secrets.MAPBOX_ACCESS_TOKEN }}
+          # Google OAuth
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          # Frontend URL (for CORS)
+          FRONTEND_URL: ${{ secrets.FRONTEND_URL }}
+          # Razorpay (reserved for future use)
+          RAZORPAY_KEY_ID: ${{ secrets.RAZORPAY_KEY_ID }}
+          RAZORPAY_KEY_SECRET: ${{ secrets.RAZORPAY_KEY_SECRET }}
+          # Node environment
+          NODE_ENV: production

@@ -1,0 +1,20 @@
+{
+    "name": "mobitrak-backend",
+    "version": "1.0.0",
+    "description": "MobiTrak backend — AWS Lambda deployment tooling",
+    "scripts": {
+        "deploy:dev": "serverless deploy --stage dev",
+        "deploy:prod": "serverless deploy --stage prod",
+        "offline": "serverless offline --stage dev",
+        "remove:dev": "serverless remove --stage dev",
+        "remove:prod": "serverless remove --stage prod",
+        "info": "serverless info --stage dev"
+    },
+    "devDependencies": {
+        "serverless": "^3.38.0",
+        "serverless-offline": "^13.3.0"
+    },
+    "dependencies": {
+        "serverless-http": "^3.2.0"
+    }
+}

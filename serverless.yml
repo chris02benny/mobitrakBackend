@@ -1,0 +1,140 @@
+service: mobitrak-backend
+
+frameworkVersion: '3'
+
+# Automatically load .env file for local development (serverless offline).
+# In CI/CD, env vars come from GitHub Actions secrets injected via the env: block.
+useDotenv: true
+
+provider:
+  name: aws
+  runtime: nodejs18.x
+  region: ap-south-1
+  stage: ${opt:stage, 'dev'}
+  memorySize: 512
+  timeout: 10
+  # HTTP API (API Gateway v2) — cheaper and faster than REST API
+  httpApi:
+    cors:
+      allowedOrigins:
+        - ${env:FRONTEND_URL, 'http://localhost:5173'}
+      allowedMethods:
+        - GET
+        - POST
+        - PUT
+        - DELETE
+        - OPTIONS
+      allowedHeaders:
+        - Content-Type
+        - Authorization
+        - x-auth-token
+      allowCredentials: true
+
+  # Environment variables — loaded from process.env / GitHub Secrets / Lambda env
+  # DO NOT hardcode values here. Use ${env:VAR_NAME} to read from environment.
+  environment:
+    NODE_ENV: ${env:NODE_ENV, 'production'}
+    MONGO_URI: ${env:MONGO_URI}
+    JWT_SECRET: ${env:JWT_SECRET}
+    FRONTEND_URL: ${env:FRONTEND_URL, 'http://localhost:5173'}
+    SMTP_HOST: ${env:SMTP_HOST}
+    SMTP_PORT: ${env:SMTP_PORT}
+    SMTP_USER: ${env:SMTP_USER}
+    SMTP_PASS: ${env:SMTP_PASS}
+    EMAIL_FROM: ${env:EMAIL_FROM}
+    CLOUDINARY_CLOUD_NAME: ${env:CLOUDINARY_CLOUD_NAME}
+    CLOUDINARY_API_KEY: ${env:CLOUDINARY_API_KEY}
+    CLOUDINARY_API_SECRET: ${env:CLOUDINARY_API_SECRET}
+    OCR_SPACE_API_KEY_USER: ${env:OCR_SPACE_API_KEY_USER}
+    OCR_SPACE_API_KEY_VEHICLE: ${env:OCR_SPACE_API_KEY_VEHICLE}
+    OPENROUTER_API_KEY_USER: ${env:OPENROUTER_API_KEY_USER}
+    OPENROUTER_API_KEY_VEHICLE: ${env:OPENROUTER_API_KEY_VEHICLE}
+    AI_API_URL: ${env:AI_API_URL}
+    AI_MODEL: ${env:AI_MODEL}
+    MAPBOX_ACCESS_TOKEN: ${env:MAPBOX_ACCESS_TOKEN}
+    GOOGLE_CLIENT_ID: ${env:GOOGLE_CLIENT_ID}
+    RAZORPAY_KEY_ID: ${env:RAZORPAY_KEY_ID, ''}
+    RAZORPAY_KEY_SECRET: ${env:RAZORPAY_KEY_SECRET, ''}
+
+functions:
+  # ===== User Service =====
+  userService:
+    handler: user-service/handler.handler
+    description: User auth, admin, and notification management
+    events:
+      - httpApi:
+          path: /api/users/{proxy+}
+          method: any
+      - httpApi:
+          path: /api/admin/{proxy+}
+          method: any
+      - httpApi:
+          path: /api/notifications/{proxy+}
+          method: any
+      - httpApi:
+          path: /health
+          method: get
+
+  # ===== Vehicle Service =====
+  vehicleService:
+    handler: vehicle-service/handler.handler
+    description: Vehicle and tracking device management
+    events:
+      - httpApi:
+          path: /api/vehicles/{proxy+}
+          method: any
+      - httpApi:
+          path: /api/vehicles
+          method: any
+      - httpApi:
+          path: /api/tracking-device/{proxy+}
+          method: any
+      - httpApi:
+          path: /api/tracking-device
+          method: any
+
+  # ===== Driver Management Service =====
+  driverService:
+    handler: driver-management-service/handler.handler
+    description: Driver profiles, job requests, employments, and ratings
+    events:
+      - httpApi:
+          path: /api/drivers/{proxy+}
+          method: any
+      - httpApi:
+          path: /api/drivers
+          method: any
+
+  # ===== Trip Service =====
+  tripService:
+    handler: trip-service/handler.handler
+    description: Trip management and real-time fleet tracking
+    events:
+      - httpApi:
+          path: /api/trips/{proxy+}
+          method: any
+      - httpApi:
+          path: /api/trips
+          method: any
+
+plugins:
+  - serverless-offline
+
+custom:
+  serverless-offline:
+    httpPort: 3000
+    host: 0.0.0.0
+    noPrependStageInUrl: true
+
+package:
+  # Each function packages independently — avoids bloating Lambda bundles
+  individually: false
+  exclude:
+    - .git/**
+    - .env
+    - '**/node_modules/.cache/**'
+    - '**/node_modules/nodemon/**'
+    - logs.txt
+    - '**/*.test.js'
+    - '**/test/**'
+    - '**/tests/**'
