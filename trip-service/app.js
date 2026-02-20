@@ -21,10 +21,21 @@ const tripRoutes = require('./src/routes/tripRoutes');
 const app = express();
 
 // ===== Middleware =====
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:5173')
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:5173,https://mobitrakapp.vercel.app')
     .split(',')
     .map(o => o.trim())
     .filter(Boolean);
+
+app.options('*', (req, res) => {
+    const origin = req.headers.origin;
+    if (origin && allowedOrigins.includes(origin)) {
+        res.set('Access-Control-Allow-Origin', origin);
+        res.set('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+        res.set('Access-Control-Allow-Headers', 'Content-Type,x-auth-token,Authorization');
+        res.set('Access-Control-Allow-Credentials', 'true');
+    }
+    res.sendStatus(200);
+});
 
 app.use(cors({
     origin: (origin, callback) => {
@@ -34,7 +45,7 @@ app.use(cors({
             callback(new Error(`CORS: origin '${origin}' not allowed`));
         }
     },
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'x-auth-token', 'Authorization'],
     credentials: true,
 }));
