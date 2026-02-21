@@ -93,7 +93,13 @@ functions:
           path: /api/users/{proxy+}
           method: any
       - httpApi:
+          path: /api/admin
+          method: any
+      - httpApi:
           path: /api/admin/{proxy+}
+          method: any
+      - httpApi:
+          path: /api/notifications
           method: any
       - httpApi:
           path: /api/notifications/{proxy+}
