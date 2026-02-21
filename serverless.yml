@@ -153,14 +153,54 @@ custom:
     noPrependStageInUrl: true
 
 package:
-  # Each function packages independently — avoids bloating Lambda bundles
   individually: false
   exclude:
+    # Dev / repo artifacts
     - .git/**
     - .env
-    - '**/node_modules/.cache/**'
-    - '**/node_modules/nodemon/**'
     - logs.txt
+    - cors-test.sh
+    - '**/*.md'
+    - '**/.DS_Store'
+    # Test files (all levels)
     - '**/*.test.js'
+    - '**/*.spec.js'
     - '**/test/**'
     - '**/tests/**'
+    - '**/__tests__/**'
+    - '**/jest.config.*'
+    # TypeScript / source-map files (not needed at runtime)
+    - '**/*.ts'
+    - '**/*.d.ts'
+    - '**/*.map'
+    # Docs / examples inside node_modules
+    - '**/node_modules/**/docs/**'
+    - '**/node_modules/**/doc/**'
+    - '**/node_modules/**/example/**'
+    - '**/node_modules/**/examples/**'
+    - '**/node_modules/**/demo/**'
+    - '**/node_modules/**/CHANGELOG*'
+    - '**/node_modules/**/HISTORY*'
+    - '**/node_modules/**/LICENSE*'
+    - '**/node_modules/**/README*'
+    # Dev-only packages
+    - '**/node_modules/.cache/**'
+    - '**/node_modules/nodemon/**'
+    - '**/node_modules/jest/**'
+    - '**/node_modules/mocha/**'
+    - '**/node_modules/chai/**'
+    - '**/node_modules/eslint/**'
+    - '**/node_modules/prettier/**'
+    - '**/node_modules/typescript/**'
+    # Large transitive packages not needed in Lambda
+    - '**/node_modules/serverless/**'
+    - '**/node_modules/serverless-offline/**'
+    # Service-level node_modules — excluded because all deps are now
+    # consolidated in the root node_modules (see root package.json).
+    # The root node_modules is the single source of truth for Lambda.
+    - 'user-service/node_modules/**'
+    - 'vehicle-service/node_modules/**'
+    - 'driver-management-service/node_modules/**'
+    - 'trip-service/node_modules/**'
+
+

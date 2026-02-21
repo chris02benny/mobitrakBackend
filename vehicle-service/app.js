@@ -6,8 +6,16 @@
  *   - handler.js (AWS Lambda, wrapped with serverless-http)
  *
  * CORS ARCHITECTURE:
- *   Production: API Gateway handles OPTIONS preflight (httpApi.cors in serverless.yml).
- *   Local dev:  serverless-offline/Docker hits Express directly; app.options() handles it.
+ *   API Gateway HTTP API with method:any routes forwards ALL methods — including
+ *   OPTIONS — directly to Lambda. Both API Gateway cors config and Express cors()
+ *   coexist safely. Express handles every invocation.
+ *
+ * MIDDLEWARE ORDER (enforced):
+ *   1. JSON + URL-encoded body parsing
+ *   2. cors() middleware (sets CORS headers on all responses)
+ *   3. app.options('*', cors()) — responds 200 to any OPTIONS preflight
+ *   4. Route registration
+ *   5. Global error handler
  */
 
 const express = require('express');
@@ -22,27 +30,17 @@ const trackingDeviceRoutes = require('./src/routes/trackingDeviceRoutes');
 
 const app = express();
 
+// ===== Body parsing (must come first) =====
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
 // ===== CORS setup =====
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:5173,https://mobitrakapp.vercel.app')
     .split(',')
     .map(o => o.trim())
     .filter(Boolean);
 
-// Inline OPTIONS handler — only reached in local dev (serverless-offline).
-// In production, API Gateway handles OPTIONS before invoking Lambda.
-app.options('*', (req, res) => {
-    const origin = req.headers.origin;
-    if (origin && allowedOrigins.includes(origin)) {
-        res.set('Access-Control-Allow-Origin', origin);
-        res.set('Access-Control-Allow-Credentials', 'true');
-    }
-    res.set('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-    res.set('Access-Control-Allow-Headers', 'Content-Type,x-auth-token,Authorization');
-    res.set('Access-Control-Max-Age', '600');
-    res.sendStatus(200);
-});
-
-app.use(cors({
+const corsOptions = {
     origin: (origin, callback) => {
         if (!origin || allowedOrigins.includes(origin)) {
             callback(null, true);
@@ -53,9 +51,15 @@ app.use(cors({
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'x-auth-token', 'Authorization'],
     credentials: true,
-}));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+    maxAge: 600,
+};
+
+// Apply CORS headers to all responses.
+app.use(cors(corsOptions));
+
+// Respond 200 to ALL OPTIONS preflights before any route or auth middleware.
+// Required because API Gateway HTTP API with method:any forwards OPTIONS to Lambda.
+app.options('*', cors(corsOptions));
 
 // ===== Routes =====
 app.use('/api/vehicles', vehicleRoutes);

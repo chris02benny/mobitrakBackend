@@ -6,19 +6,21 @@
  *   - handler.js (AWS Lambda, wrapped with serverless-http)
  *
  * CORS ARCHITECTURE:
- *   In production (AWS Lambda + API Gateway HTTP API):
- *     1. Browser sends OPTIONS preflight to API Gateway.
- *     2. API Gateway reads httpApi.cors from serverless.yml and responds
- *        with the correct CORS headers — Lambda is NEVER invoked for OPTIONS.
- *     3. Browser sends the real POST/GET request; Lambda responds with
- *        CORS headers via the cors() middleware below.
+ *   API Gateway HTTP API with method:any routes forwards ALL methods — including
+ *   OPTIONS — directly to Lambda. API Gateway's httpApi.cors block alone is
+ *   NOT sufficient when method:any is used. Express must also handle OPTIONS.
  *
- *   In local development (serverless-offline / Docker):
- *     1. serverless-offline does NOT implement the httpApi.cors intercept.
- *     2. The OPTIONS preflight reaches Express. The app.options('*') handler
- *        below responds inline so local dev works without any proxy changes.
+ *   Both layers coexist safely:
+ *     - API Gateway cors config handles non-method:any routes (if any).
+ *     - Express cors() + app.options('*', cors()) handles every invocation.
  *
- *   Result: keeping both layers is intentional and safe — they never conflict.
+ * MIDDLEWARE ORDER (enforced):
+ *   1. JSON + URL-encoded body parsing
+ *   2. cors() middleware (sets CORS headers on all responses)
+ *   3. app.options('*', cors()) — responds 200 to any OPTIONS preflight
+ *   4. Route registration
+ *   5. Global error handler
+ *   Auth middleware lives inside individual route handlers only.
  */
 
 const express = require('express');
@@ -37,31 +39,20 @@ const app = express();
 // Passport Config
 require('./src/config/passport');
 
+// ===== Body parsing (must come first) =====
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(passport.initialize());
+
 // ===== CORS setup =====
-// Build allowed-origins list from env var so Express is consistent with
-// the API Gateway config in serverless.yml.
-// NOTE: This env var does NOT affect API Gateway — see serverless.yml comment.
+// Build allowed-origins list from ALLOWED_ORIGINS env var.
+// This mirrors the allowedOrigins in serverless.yml httpApi.cors.
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:5173,https://mobitrakapp.vercel.app')
     .split(',')
     .map(o => o.trim())
     .filter(Boolean);
 
-// Inline OPTIONS handler — only reached in local dev (serverless-offline).
-// In production, API Gateway handles OPTIONS before invoking Lambda.
-// Always responds 200 so local preflight never fails.
-app.options('*', (req, res) => {
-    const origin = req.headers.origin;
-    if (origin && allowedOrigins.includes(origin)) {
-        res.set('Access-Control-Allow-Origin', origin);
-        res.set('Access-Control-Allow-Credentials', 'true');
-    }
-    res.set('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-    res.set('Access-Control-Allow-Headers', 'Content-Type,x-auth-token,Authorization');
-    res.set('Access-Control-Max-Age', '600');
-    res.sendStatus(200);
-});
-
-app.use(cors({
+const corsOptions = {
     origin: (origin, callback) => {
         // Allow server-to-server / Lambda inter-service calls (no origin header)
         // and any explicitly approved browser origin.
@@ -74,11 +65,16 @@ app.use(cors({
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'x-auth-token', 'Authorization'],
     credentials: true,
-}));
+    maxAge: 600,
+};
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-app.use(passport.initialize());
+// Apply CORS headers to all responses.
+app.use(cors(corsOptions));
+
+// Respond 200 to ALL OPTIONS preflights — this fires before any route or auth
+// middleware, ensuring preflight never triggers a 401/404 from Express.
+// Required because API Gateway HTTP API with method:any forwards OPTIONS to Lambda.
+app.options('*', cors(corsOptions));
 
 // ===== Routes =====
 app.use('/api/users', authRoutes);

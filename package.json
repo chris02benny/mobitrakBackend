@@ -8,13 +8,33 @@
         "offline": "serverless offline --stage dev",
         "remove:dev": "serverless remove --stage dev",
         "remove:prod": "serverless remove --stage prod",
-        "info": "serverless info --stage dev"
+        "info": "serverless info --stage dev",
+        "install:all": "npm install && cd user-service && npm install && cd ../vehicle-service && npm install && cd ../driver-management-service && npm install && cd ../trip-service && npm install && cd .."
+    },
+    "dependencies": {
+        "serverless-http": "^3.2.0",
+        "@mapbox/polyline": "^1.2.0",
+        "axios": "^1.13.4",
+        "bcryptjs": "^2.4.3",
+        "cloudinary": "^1.41.3",
+        "cors": "^2.8.5",
+        "dotenv": "^16.3.1",
+        "events": "^3.3.0",
+        "express": "^4.18.2",
+        "express-validator": "^7.0.1",
+        "jsonwebtoken": "^9.0.3",
+        "mongoose": "^8.0.3",
+        "multer": "^2.0.2",
+        "multer-storage-cloudinary": "^4.0.0",
+        "nodemailer": "^7.0.12",
+        "passport": "^0.7.0",
+        "passport-google-oauth20": "^2.0.0",
+        "socket.io": "^4.7.2",
+        "tesseract.js": "^5.0.3"
     },
     "devDependencies": {
         "serverless": "^3.38.0",
-        "serverless-offline": "^13.3.0"
-    },
-    "dependencies": {
-        "serverless-http": "^3.2.0"
+        "serverless-offline": "^13.3.0",
+        "nodemon": "^3.0.2"
     }
 }
