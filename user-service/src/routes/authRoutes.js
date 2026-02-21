@@ -423,6 +423,11 @@ router.post('/reset-password', async (req, res) => {
 // @desc    Auth with Google
 // @access  Public
 router.get('/auth/google', (req, res, next) => {
+    if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+        return res.status(503).json({
+            message: 'Google OAuth is not configured on this server.'
+        });
+    }
     const role = req.query.role || 'fleetmanager'; // Default to fleetmanager if not specified
     const state = role; // Pass role in state
     passport.authenticate('google', {
@@ -434,41 +439,46 @@ router.get('/auth/google', (req, res, next) => {
 // @route   GET /api/users/auth/google/callback
 // @desc    Google auth callback
 // @access  Public
-router.get('/auth/google/callback',
-    passport.authenticate('google', { session: false, failureRedirect: '/login' }), // Change failureRedirect as needed
-    (req, res) => {
-        // Successful authentication
-        const user = req.user;
-
-        // Create Token
-        const payload = {
-            user: {
-                id: user.id,
-                role: user.role
-            }
-        };
-
-        jwt.sign(
-            payload,
-            process.env.JWT_SECRET,
-            { expiresIn: 3600 * 24 },
-            (err, token) => {
-                if (err) throw err;
-
-                // Redirect to frontend with token
-                // We need to know where the frontend is running. Assuming localhost:3000 for now or configurable.
-                const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-
-                // Encode user data to pass to frontend if needed or just token
-                // Passing a flag if they need to complete profile (missing companyName or driverLicenseId)
-                let needsCompletion = false;
-                if (user.role === 'fleetmanager' && !user.companyName) needsCompletion = true;
-                if (user.role === 'driver' && (!user.driverLicenseId)) needsCompletion = true;
-
-                res.redirect(`${frontendUrl}/auth/google/callback?token=${token}&role=${user.role}&needsCompletion=${needsCompletion}`);
-            }
-        );
+router.get('/auth/google/callback', (req, res, next) => {
+    if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+        return res.status(503).json({
+            message: 'Google OAuth is not configured on this server.'
+        });
     }
+    passport.authenticate('google', { session: false, failureRedirect: '/login' })(req, res, next);
+}, (req, res) => {
+    // Successful authentication
+    const user = req.user;
+
+    // Create Token
+    const payload = {
+        user: {
+            id: user.id,
+            role: user.role
+        }
+    };
+
+    jwt.sign(
+        payload,
+        process.env.JWT_SECRET,
+        { expiresIn: 3600 * 24 },
+        (err, token) => {
+            if (err) throw err;
+
+            // Redirect to frontend with token
+            // We need to know where the frontend is running. Assuming localhost:3000 for now or configurable.
+            const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+
+            // Encode user data to pass to frontend if needed or just token
+            // Passing a flag if they need to complete profile (missing companyName or driverLicenseId)
+            let needsCompletion = false;
+            if (user.role === 'fleetmanager' && !user.companyName) needsCompletion = true;
+            if (user.role === 'driver' && (!user.driverLicenseId)) needsCompletion = true;
+
+            res.redirect(`${frontendUrl}/auth/google/callback?token=${token}&role=${user.role}&needsCompletion=${needsCompletion}`);
+        }
+    );
+}
 );
 
 // @route   POST /api/users/complete-profile
@@ -611,7 +621,7 @@ router.put('/profile', auth, async (req, res) => {
                     companyName: user.companyName,
                     timestamp: new Date()
                 };
-                
+
                 // Broadcast to user's room (all their open sessions)
                 io.to(`user-${user._id}`).emit('office-location-update', locationUpdate);
                 console.log('Broadcasted office location update to user room:', `user-${user._id}`);
@@ -876,36 +886,36 @@ router.post('/logout', auth, async (req, res) => {
 router.post('/request-verification', auth, async (req, res) => {
     try {
         const user = await User.findById(req.user.id);
-        
+
         if (!user) {
             return res.status(404).json({ message: 'User not found' });
         }
-        
+
         if (user.role !== 'fleetmanager') {
             return res.status(403).json({ message: 'Only fleet managers can request business verification' });
         }
-        
+
         if (user.isVerifiedBusiness) {
             return res.status(400).json({ message: 'Business is already verified' });
         }
-        
+
         if (user.verificationStatus === 'pending') {
             return res.status(400).json({ message: 'Verification request is already pending' });
         }
-        
+
         // Check if required fields are filled
         if (!user.companyName) {
             return res.status(400).json({ message: 'Please complete your company name before requesting verification' });
         }
-        
+
         user.verificationStatus = 'pending';
         user.verificationRequestedAt = new Date();
-        
+
         await user.save();
-        
+
         // Send email notification
         await sendVerificationRequestEmail(user.email, user.companyName);
-        
+
         res.json({
             message: 'Verification request submitted successfully. Our team will review your profile.',
             verificationStatus: user.verificationStatus,
@@ -923,11 +933,11 @@ router.post('/request-verification', auth, async (req, res) => {
 router.get('/verification-status', auth, async (req, res) => {
     try {
         const user = await User.findById(req.user.id);
-        
+
         if (!user) {
             return res.status(404).json({ message: 'User not found' });
         }
-        
+
         res.json({
             isVerifiedBusiness: user.isVerifiedBusiness,
             verificationStatus: user.verificationStatus,
