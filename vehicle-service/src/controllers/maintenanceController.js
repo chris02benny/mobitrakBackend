@@ -1,4 +1,5 @@
 const maintenanceService = require('../services/maintenanceService');
+const MaintenanceRecord = require('../models/MaintenanceRecord');
 
 /**
  * Schedule a regular service.
@@ -77,8 +78,7 @@ exports.updateMaintenanceStatus = async (req, res) => {
         const { id } = req.params;
         const { status } = req.body;
 
-        const MaintenanceRecord = require('../models/MaintenanceRecord');
-        const maintenance = await MaintenanceRecord.findById(id);
+        const maintenance = await MaintenanceRecord.findOne({ _id: id, businessId: req.user.id });
 
         if (!maintenance) {
             return res.status(404).json({ success: false, message: 'Maintenance record not found' });

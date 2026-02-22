@@ -120,10 +120,13 @@ functions:
           path: /api/vehicles
           method: any
       - httpApi:
-          path: /api/tracking-device/{proxy+}
+          path: /api/tracking-device
           method: any
       - httpApi:
-          path: /api/tracking-device
+          path: /api/maintenance/{proxy+}
+          method: any
+      - httpApi:
+          path: /api/maintenance
           method: any
 
   # ===== Driver Management Service =====
