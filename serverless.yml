@@ -120,6 +120,9 @@ functions:
           path: /api/vehicles
           method: any
       - httpApi:
+          path: /api/tracking-device/{proxy+}
+          method: any
+      - httpApi:
           path: /api/tracking-device
           method: any
       - httpApi:
