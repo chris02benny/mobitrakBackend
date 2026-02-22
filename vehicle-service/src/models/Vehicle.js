@@ -35,7 +35,7 @@ const vehicleSchema = new mongoose.Schema({
     description: { type: String },
     status: {
         type: String,
-        enum: ['IDLE', 'ASSIGNED', 'MAINTENANCE'],
+        enum: ['IDLE', 'ASSIGNED', 'MAINTENANCE', 'SERVICE_SCHEDULED', 'AVAILABLE'],
         default: 'IDLE'
     }, // Vehicle assignment status
     createdAt: {

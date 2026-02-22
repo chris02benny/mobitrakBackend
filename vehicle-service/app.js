@@ -27,6 +27,7 @@ dotenv.config();
 const vehicleRoutes = require('./src/routes/vehicleRoutes');
 const adminVehicleRoutes = require('./src/routes/adminVehicleRoutes');
 const trackingDeviceRoutes = require('./src/routes/trackingDeviceRoutes');
+const maintenanceRoutes = require('./src/routes/maintenanceRoutes');
 
 const app = express();
 
@@ -65,6 +66,7 @@ app.options('*', cors(corsOptions));
 app.use('/api/vehicles', vehicleRoutes);
 app.use('/api/vehicles/admin', adminVehicleRoutes);
 app.use('/api/tracking-device', trackingDeviceRoutes);
+app.use('/api/maintenance', maintenanceRoutes);
 
 // Health Check
 app.get('/health', (req, res) => {
