@@ -37,7 +37,7 @@ const getAvailableDrivers = asyncHandler(async (req, res) => {
         const response = await axios.get(`${userServiceUrl}/api/users/drivers/available`, {
             params: { page, limit }
         });
-        
+
         if (response.data.success && response.data.drivers) {
             // Transform the data to match frontend expectations
             const transformedDrivers = response.data.drivers.map(driver => ({
@@ -117,7 +117,7 @@ const createJobRequest = asyncHandler(async (req, res) => {
     if (!driverUser) {
         throw new NotFoundError('Driver');
     }
-    
+
     if (driverUser.role !== 'driver') {
         throw new ValidationError('User is not a driver');
     }
@@ -161,7 +161,7 @@ const createJobRequest = asyncHandler(async (req, res) => {
     if (driverUser?.email) {
         const driverName = `${driverUser.firstName || ''} ${driverUser.lastName || ''}`.trim() || 'Driver';
         const companyName = companyUser?.companyName || 'A company';
-        
+
         await sendHireRequestEmail(driverUser.email, driverName, companyName, {
             serviceType: jobDetails.serviceType,
             vehicleType: jobDetails.vehicleType,
@@ -254,20 +254,20 @@ const getSentJobRequests = asyncHandler(async (req, res) => {
     ]);
 
     console.log('Found requests:', requests.length);
-    
+
     // Fetch user details for each request
     const requestsWithUserDetails = await Promise.all(
         requests.map(async (request) => {
             const reqObj = request.toObject();
             console.log('Processing request:', reqObj._id, 'driverId:', reqObj.driverId);
-            
+
             // Fetch driver details from user-service
             if (reqObj.driverId) {
                 try {
                     console.log('Fetching user details for driverId:', reqObj.driverId);
                     const userDetails = await getUserById(reqObj.driverId);
                     console.log('User details received:', userDetails ? `${userDetails.firstName} ${userDetails.lastName}` : 'null');
-                    
+
                     if (userDetails) {
                         // Structure to match frontend expectations: driverId.userDetails
                         reqObj.driverId = {
@@ -295,7 +295,7 @@ const getSentJobRequests = asyncHandler(async (req, res) => {
                     console.error('Error fetching user details:', error.message);
                 }
             }
-            
+
             return reqObj;
         })
     );
@@ -399,9 +399,27 @@ const respondToJobRequest = asyncHandler(async (req, res) => {
                 message,
                 dlConsentGiven: true
             };
-            
+
             // Auto-finalize hiring when driver accepts
             // Create employment record with job request details
+            // Fetch driver details to store snapshot
+            let driverSnapshotData = {};
+            try {
+                const driverUserSnap = await getUserById(userId);
+                if (driverUserSnap) {
+                    driverSnapshotData = {
+                        firstName: driverUserSnap.firstName || '',
+                        lastName: driverUserSnap.lastName || '',
+                        email: driverUserSnap.email || '',
+                        profileImage: driverUserSnap.profileImage || '',
+                        licenseNumber: driverUserSnap.dlDetails?.licenseNumber || '',
+                        licenseType: driverUserSnap.dlDetails?.vehicleClasses || ''
+                    };
+                }
+            } catch (snapErr) {
+                console.error('Could not fetch driver snapshot on hire:', snapErr.message);
+            }
+
             employment = new Employment({
                 driverId: userId,
                 companyId: jobRequest.companyId,
@@ -421,7 +439,8 @@ const respondToJobRequest = asyncHandler(async (req, res) => {
                     frequency: jobRequest.offeredSalary.frequency
                 },
                 startDate: new Date(),
-                status: 'ACTIVE'
+                status: 'ACTIVE',
+                driverSnapshot: driverSnapshotData
             });
             await employment.save();
 
@@ -433,7 +452,7 @@ const respondToJobRequest = asyncHandler(async (req, res) => {
                     const userServiceUrl = process.env.USER_SERVICE_URL || 'http://localhost:5001';
                     await axios.put(
                         `${userServiceUrl}/api/admin/users/${userId}/internal-update`,
-                        { 
+                        {
                             companyName: companyUser.companyName,
                             assignmentStatus: 'UNASSIGNED'
                         },
@@ -497,7 +516,7 @@ const respondToJobRequest = asyncHandler(async (req, res) => {
     if (companyUser?.email) {
         const companyName = companyUser?.companyName || 'Your Company';
         const rejectionReason = action === 'reject' ? (message || rejection?.details || '') : '';
-        
+
         await sendHireResponseEmail(
             companyUser.email,
             companyName,
@@ -515,7 +534,7 @@ const respondToJobRequest = asyncHandler(async (req, res) => {
             driverName,
             jobRequest._id
         );
-        
+
         // Also create driver hired notification
         await NotificationClient.notifyDriverHired(
             jobRequest.companyId,

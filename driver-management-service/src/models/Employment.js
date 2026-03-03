@@ -127,6 +127,16 @@ const employmentSchema = new mongoose.Schema({
         terminatedAt: {
             type: Date
         }
+    },
+
+    // Snapshot of driver details at time of hire (used as fallback when user-service is unreachable)
+    driverSnapshot: {
+        firstName: { type: String },
+        lastName: { type: String },
+        email: { type: String },
+        profileImage: { type: String },
+        licenseNumber: { type: String },
+        licenseType: { type: String }
     }
 }, {
     timestamps: true,
@@ -139,32 +149,32 @@ employmentSchema.index({ companyId: 1, status: 1 });
 employmentSchema.index({ driverId: 1, companyId: 1, status: 1 });
 
 // Virtual for employment duration
-employmentSchema.virtual('durationInDays').get(function() {
+employmentSchema.virtual('durationInDays').get(function () {
     const endDate = this.endDate || new Date();
     const diffTime = Math.abs(endDate - this.startDate);
     return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 });
 
 // Method to check if employment is current
-employmentSchema.methods.isCurrent = function() {
+employmentSchema.methods.isCurrent = function () {
     return this.status === 'ACTIVE' && !this.endDate;
 };
 
 // Static method to get employment history for a driver
-employmentSchema.statics.getDriverHistory = function(driverId) {
+employmentSchema.statics.getDriverHistory = function (driverId) {
     return this.find({ driverId })
         .sort({ startDate: -1 })
         .exec();
 };
 
 // Static method to get active employees for a company
-employmentSchema.statics.getCompanyActiveEmployees = function(companyId) {
-    return this.find({ 
-        companyId, 
-        status: 'ACTIVE' 
+employmentSchema.statics.getCompanyActiveEmployees = function (companyId) {
+    return this.find({
+        companyId,
+        status: 'ACTIVE'
     })
-    .sort({ startDate: -1 })
-    .exec();
+        .sort({ startDate: -1 })
+        .exec();
 };
 
 module.exports = mongoose.model('Employment', employmentSchema);

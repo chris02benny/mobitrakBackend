@@ -112,13 +112,37 @@ const getCompanyEmployees = asyncHandler(async (req, res) => {
             // Add driverDetails field for easier frontend access
             empObj.driverDetails = null;
 
+            // Helper: build driverId object from a user detail source
+            const buildDriverIdObj = (src) => ({
+                _id: empObj.driverId,
+                userId: empObj.driverId,
+                userDetails: {
+                    firstName: src.firstName || '',
+                    lastName: src.lastName || '',
+                    email: src.email || '',
+                    profileImage: src.profileImage || '',
+                    phone: src.phone || ''
+                },
+                licenseDetails: {
+                    licenseNumber: src.licenseNumber || src.dlDetails?.licenseNumber || '',
+                    licenseType: src.licenseType || src.dlDetails?.vehicleClasses || '',
+                    issueDate: src.dlDetails?.issueDate,
+                    validUpto: src.dlDetails?.validUpto,
+                    address: src.dlDetails?.address
+                },
+                dlFrontUrl: src.dlFrontUrl || src.dlDetails?.dlFrontUrl,
+                dlBackUrl: src.dlBackUrl || src.dlDetails?.dlBackUrl,
+                companyName: src.companyName,
+                assignmentStatus: src.assignmentStatus || 'UNASSIGNED',
+                ratings: { averageRating: 0, totalRatings: 0 }
+            });
+
             // Fetch user details from user-service
             if (empObj.driverId) {
                 try {
                     const userDetails = await getUserById(empObj.driverId);
 
                     if (userDetails) {
-                        // Add driverDetails for easier access
                         empObj.driverDetails = {
                             firstName: userDetails.firstName,
                             lastName: userDetails.lastName,
@@ -128,32 +152,21 @@ const getCompanyEmployees = asyncHandler(async (req, res) => {
                             assignmentStatus: userDetails.assignmentStatus || 'UNASSIGNED'
                         };
 
-                        // Structure to match frontend expectations: driverId.userDetails
-                        empObj.driverId = {
-                            _id: empObj.driverId,
-                            userId: empObj.driverId,
-                            userDetails: {
-                                firstName: userDetails.firstName,
-                                lastName: userDetails.lastName,
-                                email: userDetails.email,
-                                profileImage: userDetails.profileImage,
-                                phone: userDetails.phone
-                            },
-                            licenseDetails: {
-                                licenseNumber: userDetails.dlDetails?.licenseNumber || 'N/A',
-                                licenseType: userDetails.dlDetails?.vehicleClasses,
-                                issueDate: userDetails.dlDetails?.issueDate,
-                                validUpto: userDetails.dlDetails?.validUpto,
-                                address: userDetails.dlDetails?.address
-                            },
-                            dlFrontUrl: userDetails.dlDetails?.dlFrontUrl,
-                            dlBackUrl: userDetails.dlDetails?.dlBackUrl,
-                            companyName: userDetails.companyName,
-                            assignmentStatus: userDetails.assignmentStatus || 'UNASSIGNED'
-                        };
+                        empObj.driverId = buildDriverIdObj(userDetails);
+                    } else {
+                        // Fallback to snapshot stored at hire time
+                        const snap = empObj.driverSnapshot;
+                        if (snap && snap.firstName) {
+                            empObj.driverId = buildDriverIdObj(snap);
+                        }
                     }
                 } catch (error) {
                     console.error('Error fetching user details:', error.message);
+                    // Fallback to snapshot stored at hire time
+                    const snap = empObj.driverSnapshot;
+                    if (snap && snap.firstName) {
+                        empObj.driverId = buildDriverIdObj(snap);
+                    }
                 }
             }
 

@@ -71,6 +71,10 @@ provider:
     GOOGLE_CLIENT_ID: ${env:GOOGLE_CLIENT_ID}
     RAZORPAY_KEY_ID: ${env:RAZORPAY_KEY_ID, ''}
     RAZORPAY_KEY_SECRET: ${env:RAZORPAY_KEY_SECRET, ''}
+    # Inter-service URLs — all services are behind the same API Gateway
+    USER_SERVICE_URL: ${env:USER_SERVICE_URL, 'https://g5ly7nfs0m.execute-api.ap-south-1.amazonaws.com'}
+    TRIP_SERVICE_URL: ${env:TRIP_SERVICE_URL, 'https://g5ly7nfs0m.execute-api.ap-south-1.amazonaws.com'}
+    VEHICLE_SERVICE_URL: ${env:VEHICLE_SERVICE_URL, 'https://g5ly7nfs0m.execute-api.ap-south-1.amazonaws.com'}
 
 functions:
   # ===== User Service =====
