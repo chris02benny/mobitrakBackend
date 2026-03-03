@@ -91,3 +91,7 @@ jobs:
           RAZORPAY_KEY_SECRET: ${{ secrets.RAZORPAY_KEY_SECRET }}
           # Node environment
           NODE_ENV: production
+          # Inter-service URLs (all Lambda functions share same API Gateway)
+          USER_SERVICE_URL: https://g5ly7nfs0m.execute-api.ap-south-1.amazonaws.com
+          TRIP_SERVICE_URL: https://g5ly7nfs0m.execute-api.ap-south-1.amazonaws.com
+          VEHICLE_SERVICE_URL: https://g5ly7nfs0m.execute-api.ap-south-1.amazonaws.com

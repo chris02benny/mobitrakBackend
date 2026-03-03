@@ -1,16 +1,18 @@
 const Employment = require('../models/Employment');
+const User = require('../models/User');
 const driverEventEmitter = require('../config/eventEmitter');
 const { asyncHandler, NotFoundError, ValidationError, ForbiddenError } = require('../middleware/errorHandler');
 const axios = require('axios');
 const NotificationClient = require('../services/notificationClient');
 
-// Helper to get user details from user-service
+// Helper to get user details — queries MongoDB directly (same DB shared across services).
+// This avoids fragile HTTP inter-service calls that fail with ECONNREFUSED in Lambda.
 const getUserById = async (userId) => {
     try {
-        const response = await axios.get(`${process.env.USER_SERVICE_URL || 'http://localhost:5001'}/api/users/${userId}`);
-        return response.data.user;
+        const user = await User.findById(userId).lean();
+        return user || null;
     } catch (error) {
-        console.error('Error fetching user:', error.message);
+        console.error('Error fetching user from DB:', error.message);
         return null;
     }
 };

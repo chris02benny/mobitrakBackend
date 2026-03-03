@@ -1,18 +1,20 @@
 const JobRequest = require('../models/JobRequest');
 const Employment = require('../models/Employment');
+const User = require('../models/User');
 const driverEventEmitter = require('../config/eventEmitter');
 const { asyncHandler, NotFoundError, ValidationError, ForbiddenError, ConflictError } = require('../middleware/errorHandler');
 const { sendHireRequestEmail, sendHireResponseEmail } = require('../services/emailService');
 const axios = require('axios');
 const NotificationClient = require('../services/notificationClient');
 
-// Helper to get user details from user-service
+// Helper to get user details — queries MongoDB directly (same DB shared across services).
+// This avoids fragile HTTP inter-service calls that fail with ECONNREFUSED in Lambda.
 const getUserById = async (userId) => {
     try {
-        const response = await axios.get(`${process.env.USER_SERVICE_URL || 'http://localhost:5001'}/api/users/${userId}`);
-        return response.data.user;
+        const user = await User.findById(userId).lean();
+        return user || null;
     } catch (error) {
-        console.error('Error fetching user:', error.message);
+        console.error('Error fetching user from DB:', error.message);
         return null;
     }
 };
@@ -448,20 +450,11 @@ const respondToJobRequest = asyncHandler(async (req, res) => {
             try {
                 const companyUser = await getUserById(jobRequest.companyId);
                 if (companyUser && companyUser.companyName) {
-                    // Update driver's user record with company name and assignment status
-                    const userServiceUrl = process.env.USER_SERVICE_URL || 'http://localhost:5001';
-                    await axios.put(
-                        `${userServiceUrl}/api/admin/users/${userId}/internal-update`,
-                        {
-                            companyName: companyUser.companyName,
-                            assignmentStatus: 'UNASSIGNED'
-                        },
-                        {
-                            headers: {
-                                'Content-Type': 'application/json'
-                            }
-                        }
-                    );
+                    // Update driver's user record directly in MongoDB
+                    await User.findByIdAndUpdate(userId, {
+                        companyName: companyUser.companyName,
+                        assignmentStatus: 'UNASSIGNED'
+                    });
                     console.log(`Updated driver ${userId} with company name: ${companyUser.companyName} and status: UNASSIGNED`);
                 }
             } catch (error) {
