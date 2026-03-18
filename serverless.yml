@@ -159,6 +159,12 @@ functions:
       - httpApi:
           path: /api/trips
           method: any
+      - httpApi:
+          path: /socket.io/{proxy+}
+          method: any
+      - httpApi:
+          path: /socket.io
+          method: any
 
 plugins:
   - serverless-offline

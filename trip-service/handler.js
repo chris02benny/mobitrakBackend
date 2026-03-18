@@ -20,12 +20,103 @@
 const serverless = require('serverless-http');
 const app = require('./app');
 const connectDB = require('./src/config/db');
+const { Server } = require('socket.io');
+let Trip = null;
+let DriverBehaviorLog = null;
 
 let isConnected = false;
 
-// Wrap the serverless handler so DB connect is always awaited first.
-// context.callbackWaitsForEmptyEventLoop = false prevents Lambda from hanging
-// on open MongoDB connections between invocations.
+// ── SERVERLESS SOCKET.IO POLLING SETUP ──
+// Initialize Socket.io strictly for polling, intercepting Lambda requests
+const io = new Server({
+    cors: {
+        origin: '*',
+        methods: ['GET', 'POST', 'OPTIONS'],
+        credentials: true
+    },
+    transports: ['polling']
+});
+
+const userSockets = new Map();
+
+io.on('connection', (socket) => {
+    console.log('New client connected (polling):', socket.id);
+
+    socket.on('join-fleet-room', (fleetManagerId) => {
+        socket.join(`fleet-${fleetManagerId}`);
+        userSockets.set(fleetManagerId, socket.id);
+    });
+
+    socket.on('join-monitoring-room', (driverId) => {
+        socket.join(`monitoring-driver-${driverId}`);
+        userSockets.set(driverId, socket.id);
+    });
+
+    socket.on('driver_monitoring', async (data) => {
+        const { driverId, tripId, status, perclos, ear, timestamp } = data;
+        if (!Trip) Trip = require('./src/models/Trip');
+
+        try {
+            io.emit('admin_monitoring', data);
+            if (tripId) {
+                const trip = await Trip.findById(tripId).select('fleetManagerId').lean();
+                if (trip?.fleetManagerId) {
+                    io.to(`fleet-${trip.fleetManagerId}`).emit('admin_monitoring', data);
+                }
+            }
+        } catch (err) {
+            console.error('[monitoring] Error relaying:', err.message);
+        }
+
+        if (!DriverBehaviorLog) {
+            try { DriverBehaviorLog = require('./src/models/DriverBehaviorLog'); } catch (_) { }
+        }
+        if (DriverBehaviorLog) {
+            DriverBehaviorLog.create({
+                driverId, tripId: tripId || null, status, perclos: perclos || 0, ear: ear || 0, timestamp: timestamp ? new Date(timestamp) : new Date()
+            }).catch(() => { });
+        }
+    });
+
+    socket.on('webrtc-request', (data) => {
+        io.to(`monitoring-driver-${data.driverId}`).emit('webrtc-start', { ...data, adminSocketId: socket.id });
+        const driverSocketId = userSockets.get(data.driverId);
+        if (driverSocketId) {
+            io.to(driverSocketId).emit('webrtc-start', { ...data, adminSocketId: socket.id });
+        }
+    });
+
+    socket.on('webrtc-offer', (data) => {
+        if (data.targetSocketId) io.to(data.targetSocketId).emit('webrtc-offer', data);
+        else socket.broadcast.emit('webrtc-offer', data);
+    });
+
+    socket.on('webrtc-answer', (data) => {
+        if (data.targetSocketId) io.to(data.targetSocketId).emit('webrtc-answer', data);
+        else socket.broadcast.emit('webrtc-answer', data);
+    });
+
+    socket.on('webrtc-ice-candidate', (data) => {
+        if (data.targetSocketId) io.to(data.targetSocketId).emit('webrtc-ice-candidate', data);
+        else socket.broadcast.emit('webrtc-ice-candidate', data);
+    });
+
+    socket.on('disconnect', () => {
+        for (const [userId, sockId] of userSockets.entries()) {
+            if (sockId === socket.id) {
+                userSockets.delete(userId);
+                break;
+            }
+        }
+    });
+});
+
+// Intercept socket.io endpoint before Express 404s it
+app.all('/socket.io*', (req, res) => {
+    io.engine.handleRequest(req, res);
+});
+
+// Wrap the serverless handler
 const serverlessHandler = serverless(app);
 
 module.exports.handler = async (event, context) => {
