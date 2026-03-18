@@ -37,6 +37,11 @@ const io = new Server({
     transports: ['polling']
 });
 
+// We must attach to a dummy http server so that io.engine is initialized
+const http = require('http');
+const dummyServer = http.createServer();
+io.attach(dummyServer);
+
 const userSockets = new Map();
 
 io.on('connection', (socket) => {
