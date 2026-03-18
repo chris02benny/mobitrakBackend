@@ -31,6 +31,9 @@ app.set('io', io);
 let Trip = null;
 let DriverBehaviorLog = null;
 
+// Global socket mapping
+const userSockets = new Map();
+
 // Socket.IO connection handling
 io.on('connection', (socket) => {
     console.log('New client connected:', socket.id);
@@ -38,16 +41,18 @@ io.on('connection', (socket) => {
     // ── Existing: fleet tracking room ────────────────────────────────────────
     socket.on('join-fleet-room', (fleetManagerId) => {
         socket.join(`fleet-${fleetManagerId}`);
+        userSockets.set(fleetManagerId, socket.id);
         console.log(`Client ${socket.id} joined fleet room: fleet-${fleetManagerId}`);
     });
 
     // ── NEW: Driver joins a monitoring room keyed by their driverId ──────────
     socket.on('join-monitoring-room', (driverId) => {
         socket.join(`monitoring-driver-${driverId}`);
+        userSockets.set(driverId, socket.id);
         console.log(`Client ${socket.id} joined monitoring room for driver: ${driverId}`);
     });
 
-    // ── NEW: Receive drowsiness telemetry from a driver ──────────────────────
+    // ── Receive drowsiness telemetry from a driver ──────────────────────
     socket.on('driver_monitoring', async (data) => {
         const { driverId, tripId, status, perclos, ear, timestamp } = data;
 
@@ -55,21 +60,23 @@ io.on('connection', (socket) => {
         if (!Trip) Trip = require('./src/models/Trip');
 
         try {
-            // Route the alert to the correct fleet manager's room
+            // Forward event to fleet managers
+            // Always broadcast globally for now so any fleet manager can see it
+            // (since we want all hired drivers to show up regardless of active trips)
+            io.emit('admin_monitoring', data);
+
+            // If there's an active trip, also send to the specific fleet manager's room
             if (tripId) {
                 const trip = await Trip.findById(tripId).select('fleetManagerId').lean();
                 if (trip?.fleetManagerId) {
                     io.to(`fleet-${trip.fleetManagerId}`).emit('admin_monitoring', data);
                 }
             }
-
-            // Broadcast to any admin who joined the global monitoring room
-            socket.broadcast.emit('admin_monitoring', data);
         } catch (err) {
             console.error('[monitoring] Error relaying driver_monitoring:', err.message);
         }
 
-        // Persist to MongoDB (non-blocking — do not await, never throw)
+        // Persist to MongoDB (non-blocking)
         if (!DriverBehaviorLog) {
             try { DriverBehaviorLog = require('./src/models/DriverBehaviorLog'); } catch (_) { }
         }
@@ -85,14 +92,24 @@ io.on('connection', (socket) => {
         }
     });
 
-    // ── NEW: WebRTC signaling relay (driver ↔ admin) ─────────────────────────
+    // ── WebRTC signaling relay (driver ↔ admin) ─────────────────────────
     // Admin requests video from a specific driver
     socket.on('webrtc-request', (data) => {
-        // Forward to the driver's monitoring room
+        console.log('[WebRTC] Requesting video from driver:', data.driverId);
+        // Forward to the driver's specific room
         io.to(`monitoring-driver-${data.driverId}`).emit('webrtc-start', {
             ...data,
             adminSocketId: socket.id
         });
+
+        // Fallback: if driver socket is known in the map
+        const driverSocketId = userSockets.get(data.driverId);
+        if (driverSocketId) {
+            io.to(driverSocketId).emit('webrtc-start', {
+                ...data,
+                adminSocketId: socket.id
+            });
+        }
     });
 
     // Driver sends SDP offer → forward to requesting admin
@@ -122,9 +139,16 @@ io.on('connection', (socket) => {
         }
     });
 
-    // ── Existing: disconnect ─────────────────────────────────────────────────
+    // ── Disconnect ─────────────────────────────────────────────────
     socket.on('disconnect', () => {
         console.log('Client disconnected:', socket.id);
+        // Remove from map
+        for (const [userId, sockId] of userSockets.entries()) {
+            if (sockId === socket.id) {
+                userSockets.delete(userId);
+                break;
+            }
+        }
     });
 });
 
