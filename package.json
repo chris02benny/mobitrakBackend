@@ -12,7 +12,6 @@
         "install:all": "npm install && cd user-service && npm install && cd ../vehicle-service && npm install && cd ../driver-management-service && npm install && cd ../trip-service && npm install && cd .."
     },
     "dependencies": {
-        "serverless-http": "^3.2.0",
         "@mapbox/polyline": "^1.2.0",
         "axios": "^1.13.4",
         "bcryptjs": "^2.4.3",
@@ -29,12 +28,14 @@
         "nodemailer": "^7.0.12",
         "passport": "^0.7.0",
         "passport-google-oauth20": "^2.0.0",
+        "pusher": "^5.3.3",
+        "serverless-http": "^3.2.0",
         "socket.io": "^4.7.2",
         "tesseract.js": "^5.0.3"
     },
     "devDependencies": {
+        "nodemon": "^3.0.2",
         "serverless": "^3.38.0",
-        "serverless-offline": "^13.3.0",
-        "nodemon": "^3.0.2"
+        "serverless-offline": "^13.3.0"
     }
 }

@@ -75,6 +75,11 @@ provider:
     USER_SERVICE_URL: ${env:USER_SERVICE_URL, 'https://g5ly7nfs0m.execute-api.ap-south-1.amazonaws.com'}
     TRIP_SERVICE_URL: ${env:TRIP_SERVICE_URL, 'https://g5ly7nfs0m.execute-api.ap-south-1.amazonaws.com'}
     VEHICLE_SERVICE_URL: ${env:VEHICLE_SERVICE_URL, 'https://g5ly7nfs0m.execute-api.ap-south-1.amazonaws.com'}
+    # Pusher real-time credentials
+    PUSHER_APP_ID: ${env:PUSHER_APP_ID, '2132002'}
+    PUSHER_KEY: ${env:PUSHER_KEY, '3c443eb0dc81a17f2142'}
+    PUSHER_SECRET: ${env:PUSHER_SECRET, 'ba6bbe7e72755386b914'}
+    PUSHER_CLUSTER: ${env:PUSHER_CLUSTER, 'ap2'}
 
 functions:
   # ===== User Service =====
@@ -159,11 +164,12 @@ functions:
       - httpApi:
           path: /api/trips
           method: any
+      # Pusher-based real-time relay endpoints (replaces socket.io)
       - httpApi:
-          path: /socket.io/{proxy+}
+          path: /api/realtime/{proxy+}
           method: any
       - httpApi:
-          path: /socket.io
+          path: /api/realtime
           method: any
 
 plugins:

@@ -2,123 +2,167 @@
  * trip-service/handler.js
  * AWS Lambda entry point for trip-service.
  *
- * Wraps the Express app with serverless-http.
- * Handles MongoDB connection caching for Lambda cold-start optimization.
+ * Uses Pusher for real-time events instead of Socket.IO.
+ * Socket.IO cannot work reliably on AWS Lambda due to its stateless/ephemeral nature.
+ * Pusher is a managed WebSocket service that handles connections externally.
  *
- * IMPORTANT: DB connection is established BEFORE handing off to serverless-http.
- * Previously, app.use() was called AFTER serverless(app) — which caused race
- * conditions on cold starts and resulted in 404s from uninitialized routes.
+ * Pusher channels used:
+ *   - "fleet-{fleetManagerId}"  → admin_monitoring events for specific fleet manager
+ *   - "monitoring-driver-{driverId}" → webrtc-start events for a specific driver
+ *   - "global-monitoring"        → broadcast admin_monitoring to all fleet managers
  *
- * NOTE on Socket.IO:
- *   Socket.IO will automatically fall back to HTTP long-polling transport
- *   when running under Lambda (true WebSocket requires API Gateway WebSocket APIs).
- *   Real-time events still work via polling — no client-side changes needed.
+ * WebRTC Signaling channels (private, keyed by target socket concept replaced with Pusher channels):
+ *   - "webrtc-{driverId}"       → webrtc-offer / webrtc-answer / webrtc-ice-candidate between driver and admin
  */
 
 'use strict';
 
 const serverless = require('serverless-http');
+const Pusher = require('pusher');
 const app = require('./app');
 const connectDB = require('./src/config/db');
-const { Server } = require('socket.io');
+
 let Trip = null;
 let DriverBehaviorLog = null;
-
 let isConnected = false;
 
-// ── SERVERLESS SOCKET.IO POLLING SETUP ──
-// Initialize Socket.io strictly for polling, intercepting Lambda requests
-const io = new Server({
-    cors: {
-        origin: '*',
-        methods: ['GET', 'POST', 'OPTIONS'],
-        credentials: true
-    },
-    transports: ['polling']
+// ── Initialize Pusher Server SDK ──────────────────────────────────────────────
+const pusher = new Pusher({
+    appId: process.env.PUSHER_APP_ID,
+    key: process.env.PUSHER_KEY,
+    secret: process.env.PUSHER_SECRET,
+    cluster: process.env.PUSHER_CLUSTER || 'ap2',
+    useTLS: true,
 });
 
-// We must attach to a dummy http server so that io.engine is initialized
-const http = require('http');
-const dummyServer = http.createServer();
-io.attach(dummyServer);
+// Expose pusher instance to Express routes via app locals
+app.locals.pusher = pusher;
 
-const userSockets = new Map();
+// ── REST endpoint for driver monitoring telemetry ──────────────────────────────
+// Drivers POST telemetry here; Lambda triggers Pusher to broadcast to fleet managers.
+// This replaces the socket.on('driver_monitoring') handler.
+app.post('/api/realtime/driver-monitoring', async (req, res) => {
+    try {
+        const { driverId, tripId, status, perclos, ear, timestamp, driverName } = req.body;
+        if (!driverId) return res.status(400).json({ error: 'driverId required' });
 
-io.on('connection', (socket) => {
-    console.log('New client connected (polling):', socket.id);
-
-    socket.on('join-fleet-room', (fleetManagerId) => {
-        socket.join(`fleet-${fleetManagerId}`);
-        userSockets.set(fleetManagerId, socket.id);
-    });
-
-    socket.on('join-monitoring-room', (driverId) => {
-        socket.join(`monitoring-driver-${driverId}`);
-        userSockets.set(driverId, socket.id);
-    });
-
-    socket.on('driver_monitoring', async (data) => {
-        const { driverId, tripId, status, perclos, ear, timestamp } = data;
+        // Lazy-load models
         if (!Trip) Trip = require('./src/models/Trip');
 
-        try {
-            io.emit('admin_monitoring', data);
-            if (tripId) {
+        // Trigger to global channel so ALL fleet managers receive it
+        await pusher.trigger('global-monitoring', 'admin_monitoring', {
+            driverId,
+            tripId: tripId || null,
+            status,
+            perclos: perclos ?? 0,
+            ear: ear ?? 0,
+            timestamp: timestamp || new Date().toISOString(),
+            driverName: driverName || null,
+        });
+
+        // Also trigger to the specific fleet manager's channel if there's an active trip
+        if (tripId) {
+            try {
                 const trip = await Trip.findById(tripId).select('fleetManagerId').lean();
                 if (trip?.fleetManagerId) {
-                    io.to(`fleet-${trip.fleetManagerId}`).emit('admin_monitoring', data);
+                    await pusher.trigger(`fleet-${trip.fleetManagerId}`, 'admin_monitoring', {
+                        driverId,
+                        tripId,
+                        status,
+                        perclos: perclos ?? 0,
+                        ear: ear ?? 0,
+                        timestamp: timestamp || new Date().toISOString(),
+                        driverName: driverName || null,
+                    });
                 }
+            } catch (tripErr) {
+                console.error('[monitoring] Error fetching trip for fleet-room trigger:', tripErr.message);
             }
-        } catch (err) {
-            console.error('[monitoring] Error relaying:', err.message);
         }
 
+        // Persist to MongoDB (non-blocking)
         if (!DriverBehaviorLog) {
             try { DriverBehaviorLog = require('./src/models/DriverBehaviorLog'); } catch (_) { }
         }
         if (DriverBehaviorLog) {
             DriverBehaviorLog.create({
-                driverId, tripId: tripId || null, status, perclos: perclos || 0, ear: ear || 0, timestamp: timestamp ? new Date(timestamp) : new Date()
-            }).catch(() => { });
+                driverId,
+                tripId: tripId || null,
+                status,
+                perclos: perclos || 0,
+                ear: ear || 0,
+                timestamp: timestamp ? new Date(timestamp) : new Date()
+            }).catch(err => console.error('[monitoring] DB log error:', err.message));
         }
-    });
 
-    socket.on('webrtc-request', (data) => {
-        io.to(`monitoring-driver-${data.driverId}`).emit('webrtc-start', { ...data, adminSocketId: socket.id });
-        const driverSocketId = userSockets.get(data.driverId);
-        if (driverSocketId) {
-            io.to(driverSocketId).emit('webrtc-start', { ...data, adminSocketId: socket.id });
-        }
-    });
-
-    socket.on('webrtc-offer', (data) => {
-        if (data.targetSocketId) io.to(data.targetSocketId).emit('webrtc-offer', data);
-        else socket.broadcast.emit('webrtc-offer', data);
-    });
-
-    socket.on('webrtc-answer', (data) => {
-        if (data.targetSocketId) io.to(data.targetSocketId).emit('webrtc-answer', data);
-        else socket.broadcast.emit('webrtc-answer', data);
-    });
-
-    socket.on('webrtc-ice-candidate', (data) => {
-        if (data.targetSocketId) io.to(data.targetSocketId).emit('webrtc-ice-candidate', data);
-        else socket.broadcast.emit('webrtc-ice-candidate', data);
-    });
-
-    socket.on('disconnect', () => {
-        for (const [userId, sockId] of userSockets.entries()) {
-            if (sockId === socket.id) {
-                userSockets.delete(userId);
-                break;
-            }
-        }
-    });
+        res.json({ success: true });
+    } catch (err) {
+        console.error('[monitoring] Error triggering Pusher event:', err.message);
+        res.status(500).json({ error: 'Failed to relay telemetry' });
+    }
 });
 
-// Intercept socket.io endpoint before Express 404s it
-app.all('/socket.io*', (req, res) => {
-    io.engine.handleRequest(req, res);
+// ── REST endpoint for WebRTC signaling ────────────────────────────────────────
+// All WebRTC messages go through Pusher channels instead of socket relay.
+app.post('/api/realtime/webrtc', async (req, res) => {
+    try {
+        const { event, driverId, data } = req.body;
+
+        if (!event || !driverId) {
+            return res.status(400).json({ error: 'event and driverId required' });
+        }
+
+        // Determine channel based on event type
+        let channel;
+        if (event === 'webrtc-request') {
+            // Admin wants to see driver's video → push to driver's channel
+            channel = `monitoring-driver-${driverId}`;
+            await pusher.trigger(channel, 'webrtc-start', { ...data, driverId });
+        } else if (event === 'webrtc-offer') {
+            // Driver sends SDP offer → push to admin's channel (keyed by adminId)
+            channel = `webrtc-admin-${data.adminId || driverId}`;
+            await pusher.trigger(channel, 'webrtc-offer', { ...data, driverId });
+        } else if (event === 'webrtc-answer') {
+            // Admin sends SDP answer → push to driver's channel
+            channel = `monitoring-driver-${driverId}`;
+            await pusher.trigger(channel, 'webrtc-answer', data);
+        } else if (event === 'webrtc-ice-candidate') {
+            // Bidirectional ICE relay
+            channel = data.targetType === 'admin'
+                ? `webrtc-admin-${data.adminId}`
+                : `monitoring-driver-${driverId}`;
+            await pusher.trigger(channel, 'webrtc-ice-candidate', data);
+        } else {
+            return res.status(400).json({ error: `Unknown event: ${event}` });
+        }
+
+        res.json({ success: true, channel, event });
+    } catch (err) {
+        console.error('[webrtc] Error triggering Pusher WebRTC event:', err.message);
+        res.status(500).json({ error: 'Failed to relay WebRTC signal' });
+    }
+});
+
+// ── REST endpoint for location updates ────────────────────────────────────────
+app.post('/api/realtime/location-update', async (req, res) => {
+    try {
+        const { fleetManagerId, vehicleId, location, tripId } = req.body;
+
+        if (fleetManagerId) {
+            await pusher.trigger(`fleet-${fleetManagerId}`, 'location-update', {
+                vehicleId, location, tripId
+            });
+        }
+        // Also broadcast globally
+        await pusher.trigger('global-monitoring', 'location-update', {
+            vehicleId, location, tripId
+        });
+
+        res.json({ success: true });
+    } catch (err) {
+        console.error('[location] Error triggering location-update:', err.message);
+        res.status(500).json({ error: 'Failed to relay location update' });
+    }
 });
 
 // Wrap the serverless handler
