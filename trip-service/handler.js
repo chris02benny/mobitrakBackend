@@ -102,46 +102,6 @@ app.post('/api/realtime/driver-monitoring', async (req, res) => {
     }
 });
 
-// ── REST endpoint for WebRTC signaling ────────────────────────────────────────
-// All WebRTC messages go through Pusher channels instead of socket relay.
-app.post('/api/realtime/webrtc', async (req, res) => {
-    try {
-        const { event, driverId, data } = req.body;
-
-        if (!event || !driverId) {
-            return res.status(400).json({ error: 'event and driverId required' });
-        }
-
-        // Determine channel based on event type
-        let channel;
-        if (event === 'webrtc-request') {
-            // Admin wants to see driver's video → push to driver's channel
-            channel = `monitoring-driver-${driverId}`;
-            await pusher.trigger(channel, 'webrtc-start', { ...data, driverId });
-        } else if (event === 'webrtc-offer') {
-            // Driver sends SDP offer → push to admin's channel (keyed by adminId)
-            channel = `webrtc-admin-${data.adminId || driverId}`;
-            await pusher.trigger(channel, 'webrtc-offer', { ...data, driverId });
-        } else if (event === 'webrtc-answer') {
-            // Admin sends SDP answer → push to driver's channel
-            channel = `monitoring-driver-${driverId}`;
-            await pusher.trigger(channel, 'webrtc-answer', data);
-        } else if (event === 'webrtc-ice-candidate') {
-            // Bidirectional ICE relay
-            channel = data.targetType === 'admin'
-                ? `webrtc-admin-${data.adminId}`
-                : `monitoring-driver-${driverId}`;
-            await pusher.trigger(channel, 'webrtc-ice-candidate', data);
-        } else {
-            return res.status(400).json({ error: `Unknown event: ${event}` });
-        }
-
-        res.json({ success: true, channel, event });
-    } catch (err) {
-        console.error('[webrtc] Error triggering Pusher WebRTC event:', err.message);
-        res.status(500).json({ error: 'Failed to relay WebRTC signal' });
-    }
-});
 
 // ── REST endpoint for location updates ────────────────────────────────────────
 app.post('/api/realtime/location-update', async (req, res) => {
