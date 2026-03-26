@@ -66,6 +66,119 @@ app.options('*', cors(corsOptions));
 // ===== Routes =====
 app.use('/api/trips', tripRoutes);
 
+// ===== Pusher & Real-time Routes =====
+const Pusher = require('pusher');
+
+let Trip = null;
+let DriverBehaviorLog = null;
+
+// Only initialize Pusher if credentials are provided to gracefully handle missing env vars
+let pusherInstance = null;
+if (process.env.PUSHER_APP_ID && process.env.PUSHER_KEY && process.env.PUSHER_SECRET) {
+    pusherInstance = new Pusher({
+        appId: process.env.PUSHER_APP_ID,
+        key: process.env.PUSHER_KEY,
+        secret: process.env.PUSHER_SECRET,
+        cluster: process.env.PUSHER_CLUSTER || 'ap2',
+        useTLS: true,
+    });
+}
+
+app.locals.pusher = pusherInstance;
+
+// ── REST endpoint for driver monitoring telemetry ──────────────────────────────
+app.post('/api/realtime/driver-monitoring', async (req, res) => {
+    try {
+        const { driverId, tripId, status, perclos, ear, timestamp, driverName } = req.body;
+        if (!driverId) return res.status(400).json({ error: 'driverId required' });
+
+        if (!pusherInstance) {
+            console.warn('[monitoring] Pusher not configured. Telemetry ignored.');
+            return res.status(503).json({ error: 'Pusher not configured' });
+        }
+
+        // Lazy-load models
+        if (!Trip) Trip = require('./src/models/Trip');
+
+        // Trigger to global channel so ALL fleet managers receive it
+        await pusherInstance.trigger('global-monitoring', 'admin_monitoring', {
+            driverId,
+            tripId: tripId || null,
+            status,
+            perclos: perclos ?? 0,
+            ear: ear ?? 0,
+            timestamp: timestamp || new Date().toISOString(),
+            driverName: driverName || null,
+        });
+
+        // Also trigger to the specific fleet manager's channel if there's an active trip
+        if (tripId) {
+            try {
+                const trip = await Trip.findById(tripId).select('fleetManagerId').lean();
+                if (trip?.fleetManagerId) {
+                    await pusherInstance.trigger(`fleet-${trip.fleetManagerId}`, 'admin_monitoring', {
+                        driverId,
+                        tripId,
+                        status,
+                        perclos: perclos ?? 0,
+                        ear: ear ?? 0,
+                        timestamp: timestamp || new Date().toISOString(),
+                        driverName: driverName || null,
+                    });
+                }
+            } catch (tripErr) {
+                console.error('[monitoring] Error fetching trip for fleet-room trigger:', tripErr.message);
+            }
+        }
+
+        // Persist to MongoDB (non-blocking)
+        if (!DriverBehaviorLog) {
+            try { DriverBehaviorLog = require('./src/models/DriverBehaviorLog'); } catch (_) { }
+        }
+        if (DriverBehaviorLog) {
+            DriverBehaviorLog.create({
+                driverId,
+                tripId: tripId || null,
+                status,
+                perclos: perclos || 0,
+                ear: ear || 0,
+                timestamp: timestamp ? new Date(timestamp) : new Date()
+            }).catch(err => console.error('[monitoring] DB log error:', err.message));
+        }
+
+        res.json({ success: true });
+    } catch (err) {
+        console.error('[monitoring] Error triggering Pusher event:', err.message);
+        res.status(500).json({ error: 'Failed to relay telemetry' });
+    }
+});
+
+// ── REST endpoint for location updates ────────────────────────────────────────
+app.post('/api/realtime/location-update', async (req, res) => {
+    try {
+        const { fleetManagerId, vehicleId, location, tripId } = req.body;
+
+        if (!pusherInstance) {
+            return res.status(503).json({ error: 'Pusher not configured' });
+        }
+
+        if (fleetManagerId) {
+            await pusherInstance.trigger(`fleet-${fleetManagerId}`, 'location-update', {
+                vehicleId, location, tripId
+            });
+        }
+        // Also broadcast globally
+        await pusherInstance.trigger('global-monitoring', 'location-update', {
+            vehicleId, location, tripId
+        });
+
+        res.json({ success: true });
+    } catch (err) {
+        console.error('[location] Error triggering location-update:', err.message);
+        res.status(500).json({ error: 'Failed to relay location update' });
+    }
+});
+
 // Health Check
 app.get('/health', (req, res) => {
     res.json({ status: 'ok', service: 'trip-service' });
