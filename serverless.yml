@@ -108,12 +108,6 @@ functions:
           path: /api/admin/{proxy+}
           method: any
       - httpApi:
-          path: /api/notifications
-          method: any
-      - httpApi:
-          path: /api/notifications/{proxy+}
-          method: any
-      - httpApi:
           path: /health
           method: any
 
