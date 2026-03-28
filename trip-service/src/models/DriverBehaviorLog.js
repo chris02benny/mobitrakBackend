@@ -57,6 +57,44 @@ const driverBehaviorLogSchema = new mongoose.Schema(
             default: 0
         },
 
+        /**
+         * Whether live monitoring was active at time of this event.
+         * true = driver was actively monitoring; false = stopped or inactive.
+         */
+        monitoringActive: {
+            type: Boolean,
+            default: true,
+            index: true
+        },
+
+        /**
+         * Extended health status including environmental conditions.
+         * DROWSY  = High PERCLOS (driver drowsy).
+         * ALERT   = Normal state (eyes open, good light).
+         * LOW_LIGHT = Ambient light insufficient for face detection.
+         * NO_FACE = No face detected in frame (>2s).
+         * INACTIVE = Driver explicitly stopped monitoring.
+         * OFFLINE = Driver disconnected (timeout-driven, not in payload).
+         */
+        healthStatus: {
+            type: String,
+            enum: ['DROWSY', 'ALERT', 'LOW_LIGHT', 'NO_FACE', 'INACTIVE', 'OFFLINE'],
+            default: 'ALERT',
+            index: true
+        },
+
+        /**
+         * Source of the telemetry event.
+         * 'driver-monitoring' = from DriverMonitoring component.
+         * 'session-start' = explicit monitoring session started.
+         * 'session-stop' = explicit monitoring session stopped.
+         */
+        source: {
+            type: String,
+            enum: ['driver-monitoring', 'session-start', 'session-stop'],
+            default: 'driver-monitoring'
+        },
+
         /** Client-supplied UTC timestamp of the event */
         timestamp: {
             type: Date,
