@@ -77,7 +77,23 @@ router.post('/internal/create', authenticateInternalService, async (req, res) =>
 router.get('/', authenticateUser, async (req, res) => {
     try {
         const userId = req.user.user?.id || req.user.userId;
+        
+        if (!userId) {
+            console.error('[NOTIFICATION] No userId found in token:', JSON.stringify(req.user));
+            return res.status(400).json({
+                success: false,
+                message: 'User ID not found in token',
+                token_structure: req.user
+            });
+        }
+
         const { page, limit, unreadOnly } = req.query;
+
+        console.log('[NOTIFICATION] Fetching notifications for user:', userId, {
+            page: page || 1,
+            limit: limit || 20,
+            unreadOnly: unreadOnly === 'true'
+        });
 
         const result = await NotificationService.getUserNotifications(userId, {
             page: parseInt(page) || 1,
@@ -90,7 +106,7 @@ router.get('/', authenticateUser, async (req, res) => {
             data: result
         });
     } catch (error) {
-        console.error('Error fetching notifications:', error);
+        console.error('[NOTIFICATION] Error fetching notifications:', error.message, error.stack);
         res.status(500).json({
             success: false,
             message: 'Failed to fetch notifications',
@@ -107,6 +123,17 @@ router.get('/', authenticateUser, async (req, res) => {
 router.get('/unread-count', authenticateUser, async (req, res) => {
     try {
         const userId = req.user.user?.id || req.user.userId;
+
+        if (!userId) {
+            console.error('[NOTIFICATION] No userId found in token for unread-count:', JSON.stringify(req.user));
+            return res.status(400).json({
+                success: false,
+                message: 'User ID not found in token'
+            });
+        }
+
+        console.log('[NOTIFICATION] Fetching unread count for user:', userId);
+
         const count = await NotificationService.getUnreadCount(userId);
 
         res.json({
@@ -114,7 +141,7 @@ router.get('/unread-count', authenticateUser, async (req, res) => {
             count
         });
     } catch (error) {
-        console.error('Error fetching unread count:', error);
+        console.error('[NOTIFICATION] Error fetching unread count:', error.message, error.stack);
         res.status(500).json({
             success: false,
             message: 'Failed to fetch unread count',

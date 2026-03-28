@@ -30,12 +30,24 @@ class NotificationService {
      */
     static async getUserNotifications(userId, { page = 1, limit = 20, unreadOnly = false } = {}) {
         try {
+            // Ensure userId is valid
+            if (!userId) {
+                throw new Error('userId is required');
+            }
+
             const query = { userId };
             if (unreadOnly) {
                 query.isRead = false;
             }
 
             const skip = (page - 1) * limit;
+
+            console.log('[NOTIFICATION] Database query for user', userId, 'with options:', {
+                page,
+                limit,
+                unreadOnly,
+                skip
+            });
 
             const [notifications, total, unreadCount] = await Promise.all([
                 Notification.find(query)
@@ -46,6 +58,8 @@ class NotificationService {
                 Notification.getUnreadCount(userId)
             ]);
 
+            console.log('[NOTIFICATION] Found', notifications.length, 'notifications for user', userId);
+
             return {
                 notifications,
                 total,
@@ -54,7 +68,7 @@ class NotificationService {
                 totalPages: Math.ceil(total / limit)
             };
         } catch (error) {
-            console.error('[NOTIFICATION] Error fetching notifications:', error);
+            console.error('[NOTIFICATION] Error fetching notifications:', error.message, error);
             throw error;
         }
     }
@@ -109,9 +123,16 @@ class NotificationService {
      */
     static async getUnreadCount(userId) {
         try {
-            return await Notification.getUnreadCount(userId);
+            if (!userId) {
+                console.warn('[NOTIFICATION] getUnreadCount called without userId');
+                return 0;
+            }
+
+            const count = await Notification.getUnreadCount(userId);
+            console.log('[NOTIFICATION] Unread count for user', userId, ':', count);
+            return count;
         } catch (error) {
-            console.error('[NOTIFICATION] Error getting unread count:', error);
+            console.error('[NOTIFICATION] Error getting unread count for user', userId, ':', error.message);
             return 0;
         }
     }
