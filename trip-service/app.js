@@ -122,13 +122,13 @@ function isDuplicate(hash) {
  * Normalize and validate monitoring telemetry payload.
  * Contract: {
  *   driverId (required): string,
- *   tripId (optional): string or null,
+ *   fleetManagerId (required): string,
+ *   status (required): enum DROWSY|ALERT|LOW_LIGHT|NO_FACE|INACTIVE,
  *   monitoringActive (optional): boolean, default true,
- *   status (required): enum DROWSY|ALERT|LOW_LIGHT|NO_FACE,
+ *   source (optional): string,
  *   perclos (optional): number 0-1, default 0,
  *   ear (optional): number >=0, default 0,
- *   timestamp (optional): ISO8601, default now,
- *   driverName (optional): string for display
+ *   timestamp (optional): ISO8601, default now
  * }
  * Returns normalized object or null if validation fails.
  */
@@ -138,7 +138,12 @@ function validateAndNormalizeMonitoringEvent(body) {
         return null;
     }
 
-    // Required: status from defined enum (including health states)
+    // Required: fleetManagerId
+    if (!body.fleetManagerId || typeof body.fleetManagerId !== 'string') {
+        return null;
+    }
+
+    // Required: status from defined enum
     const validStatuses = ['DROWSY', 'ALERT', 'LOW_LIGHT', 'NO_FACE', 'INACTIVE'];
     if (!body.status || !validStatuses.includes(body.status)) {
         return null;
@@ -147,15 +152,13 @@ function validateAndNormalizeMonitoringEvent(body) {
     // Defaults and coercion
     const normalized = {
         driverId: body.driverId,
-        tripId: body.tripId || null,
-        monitoringActive: body.monitoringActive !== undefined ? Boolean(body.monitoringActive) : true,
+        fleetManagerId: body.fleetManagerId,
         status: body.status,
-        healthStatus: body.status, // Map status to healthStatus field
+        monitoringActive: body.monitoringActive !== undefined ? Boolean(body.monitoringActive) : true,
         source: body.source || 'driver-monitoring',
         perclos: Math.max(0, Math.min(1, parseFloat(body.perclos) || 0)),
         ear: Math.max(0, parseFloat(body.ear) || 0),
         timestamp: body.timestamp ? new Date(body.timestamp) : new Date(),
-        driverName: body.driverName || null
     };
 
     return normalized;
@@ -164,24 +167,17 @@ function validateAndNormalizeMonitoringEvent(body) {
 // ── REST endpoint for driver monitoring telemetry ──────────────────────────────
 app.post('/api/realtime/driver-monitoring', async (req, res) => {
     try {
-        // 📥 LOG INCOMING PAYLOAD
-        console.log('[monitoring] 📥 Incoming telemetry from driver:', {
-            driverId: req.body.driverId,
-            tripId: req.body.tripId,
-            status: req.body.status,
-            source: req.body.source,
-            monitoringActive: req.body.monitoringActive,
-            timestamp: req.body.timestamp,
-        });
+        // 📥 LOG INCOMING PAYLOAD AS REQUESTED
+        console.log('Incoming telemetry:', req.body);
 
-        // Validate and normalize
+        // Validate and normalize  
         const normalized = validateAndNormalizeMonitoringEvent(req.body);
         if (!normalized) {
             console.warn('[monitoring] ❌ Invalid payload rejected:', JSON.stringify(req.body).slice(0, 100));
-            return res.status(400).json({ error: 'Invalid payload: driverId, status required' });
+            return res.status(400).json({ error: 'driverId and fleetManagerId are required' });
         }
 
-        const { driverId, tripId, status, healthStatus, monitoringActive, source, perclos, ear, timestamp, driverName } = normalized;
+        const { driverId, fleetManagerId, status, monitoringActive, source, perclos, ear, timestamp } = normalized;
 
         if (!pusherInstance) {
             console.error('[monitoring] ❌ Pusher not configured. Telemetry ignored.');
@@ -195,64 +191,27 @@ app.post('/api/realtime/driver-monitoring', async (req, res) => {
             return res.json({ success: true, suppressed: true });
         }
 
-        // Lazy-load models
-        if (!Trip) Trip = require('./src/models/Trip');
-
-        // Build relay payload
+        // Build relay payload with simplified contract
         const relayPayload = {
             driverId,
-            tripId: tripId || null,
             status,
-            healthStatus,
-            monitoringActive,
-            perclos,
-            ear,
-            timestamp: timestamp.toISOString(),
-            driverName,
-            relayedAt: new Date().toISOString()
+            timestamp: timestamp.toISOString()
         };
 
-        // Attempt to resolve fleet manager from tripId or driver's active trip
-        let fleetManagerId = null;
-        
-        console.log('[monitoring] 🔍 Attempting to resolve fleetManagerId. TripId:', tripId);
-        
-        if (tripId) {
-            try {
-                const trip = await Trip.findById(tripId).select('fleetManagerId').lean();
-                console.log('[monitoring] 📦 Trip lookup result:', { tripId, foundTrip: !!trip, fleetManagerId: trip?.fleetManagerId });
-                fleetManagerId = trip?.fleetManagerId;
-            } catch (tripErr) {
-                console.warn(`[monitoring] ⚠️  Failed to fetch trip ${tripId}:`, tripErr.message);
-            }
-        } else {
-            console.warn('[monitoring] ⚠️  TripId is missing/null - fleet-specific channel will not be triggered. Using fallback global channel.');
-        }
-
-        // If no fleet manager from trip, attempt best-effort lookup using fleetManagerId from request
-        if (!fleetManagerId && req.user?.fleetManagerId) {
-            console.log('[monitoring] 🔄 Fallback: Using fleetManagerId from req.user:', req.user.fleetManagerId);
-            fleetManagerId = req.user.fleetManagerId;
-        }
-
-        // 🌐 TRIGGER GLOBAL CHANNEL (ALWAYS)
+        // 🌐 TRIGGER GLOBAL CHANNEL (OPTIONAL - for broadcast awareness)
         try {
-            await pusherInstance.trigger('global-monitoring', 'admin_monitoring', relayPayload);
+            await pusherInstance.trigger('global-monitoring', 'driver-alert', relayPayload);
             console.log(`[monitoring] ✅ Pushed to global-monitoring: driverId=${driverId}, status=${status}`);
         } catch (pushErr) {
             console.error('[monitoring] ❌ Failed to trigger global-monitoring:', pushErr.message);
         }
 
-        // 👥 TRIGGER FLEET-SPECIFIC CHANNEL (IF RESOLVED)
-        if (fleetManagerId) {
-            try {
-                await pusherInstance.trigger(`fleet-${fleetManagerId}`, 'admin_monitoring', relayPayload);
-                console.log(`[monitoring] ✅ Pushed to fleet-${fleetManagerId}: driverId=${driverId}`);
-            } catch (fleetPushErr) {
-                console.error(`[monitoring] ❌ Failed to trigger fleet-${fleetManagerId}:`, fleetPushErr.message);
-            }
-        } else {
-            console.warn('[monitoring] ⚠️  No fleetManagerId resolved - fleet-specific event NOT triggered (global fallback will handle it)');
+        // 👥 TRIGGER FLEET-SPECIFIC CHANNEL (PRIMARY)
+        try {
+            await pusherInstance.trigger(`fleet-${fleetManagerId}`, 'driver-alert', relayPayload);
+            console.log(`[monitoring] ✅ Pushed to fleet-${fleetManagerId}: driverId=${driverId}`);
+        } catch (fleetPushErr) {
+            console.error(`[monitoring] ❌ Failed to trigger fleet-${fleetManagerId}:`, fleetPushErr.message);
         }
 
         // Persist to MongoDB (non-blocking) with extended schema
@@ -262,9 +221,8 @@ app.post('/api/realtime/driver-monitoring', async (req, res) => {
         if (DriverBehaviorLog) {
             DriverBehaviorLog.create({
                 driverId,
-                tripId: tripId || null,
                 status,
-                healthStatus,
+                fleetManagerId,
                 monitoringActive,
                 source: source || 'driver-monitoring',
                 perclos,
