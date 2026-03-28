@@ -89,6 +89,11 @@ jobs:
           # Razorpay (reserved for future use)
           RAZORPAY_KEY_ID: ${{ secrets.RAZORPAY_KEY_ID }}
           RAZORPAY_KEY_SECRET: ${{ secrets.RAZORPAY_KEY_SECRET }}
+          # Pusher real-time credentials
+          PUSHER_APP_ID: ${{ secrets.PUSHER_APP_ID }}
+          PUSHER_KEY: ${{ secrets.PUSHER_KEY }}
+          PUSHER_SECRET: ${{ secrets.PUSHER_SECRET }}
+          PUSHER_CLUSTER: ${{ secrets.PUSHER_CLUSTER, 'ap2' }}
           # Node environment
           NODE_ENV: production
           # Inter-service URLs (all Lambda functions share same API Gateway)
