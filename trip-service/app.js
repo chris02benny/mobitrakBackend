@@ -82,6 +82,21 @@ if (process.env.PUSHER_APP_ID && process.env.PUSHER_KEY && process.env.PUSHER_SE
         cluster: process.env.PUSHER_CLUSTER || 'ap2',
         useTLS: true,
     });
+    
+    // 🔧 LOG PUSHER CONFIG ON STARTUP
+    console.log('[Pusher] ✅ Initialized with config:', {
+        appId: process.env.PUSHER_APP_ID,
+        cluster: process.env.PUSHER_CLUSTER || 'ap2',
+        useTLS: true,
+        keyLength: process.env.PUSHER_KEY?.length || 0,
+        secretLength: process.env.PUSHER_SECRET?.length || 0,
+    });
+} else {
+    console.error('[Pusher] ❌ NOT INITIALIZED - Missing credentials:', {
+        hasAppId: !!process.env.PUSHER_APP_ID,
+        hasKey: !!process.env.PUSHER_KEY,
+        hasSecret: !!process.env.PUSHER_SECRET,
+    });
 }
 
 app.locals.pusher = pusherInstance;
@@ -149,24 +164,34 @@ function validateAndNormalizeMonitoringEvent(body) {
 // ── REST endpoint for driver monitoring telemetry ──────────────────────────────
 app.post('/api/realtime/driver-monitoring', async (req, res) => {
     try {
+        // 📥 LOG INCOMING PAYLOAD
+        console.log('[monitoring] 📥 Incoming telemetry from driver:', {
+            driverId: req.body.driverId,
+            tripId: req.body.tripId,
+            status: req.body.status,
+            source: req.body.source,
+            monitoringActive: req.body.monitoringActive,
+            timestamp: req.body.timestamp,
+        });
+
         // Validate and normalize
         const normalized = validateAndNormalizeMonitoringEvent(req.body);
         if (!normalized) {
-            console.warn('[monitoring] Invalid payload rejected:', JSON.stringify(req.body).slice(0, 100));
+            console.warn('[monitoring] ❌ Invalid payload rejected:', JSON.stringify(req.body).slice(0, 100));
             return res.status(400).json({ error: 'Invalid payload: driverId, status required' });
         }
 
         const { driverId, tripId, status, healthStatus, monitoringActive, source, perclos, ear, timestamp, driverName } = normalized;
 
         if (!pusherInstance) {
-            console.warn('[monitoring] Pusher not configured. Telemetry ignored.');
+            console.error('[monitoring] ❌ Pusher not configured. Telemetry ignored.');
             return res.status(503).json({ error: 'Pusher not configured' });
         }
 
         // Deduplication check
         const eventHash = getEventHash(driverId, status, monitoringActive, source);
         if (isDuplicate(eventHash)) {
-            console.debug(`[monitoring] Duplicate suppressed: driverId=${driverId}, status=${status}`);
+            console.debug(`[monitoring] ⏭️  Duplicate suppressed: driverId=${driverId}, status=${status}`);
             return res.json({ success: true, suppressed: true });
         }
 
@@ -189,28 +214,45 @@ app.post('/api/realtime/driver-monitoring', async (req, res) => {
 
         // Attempt to resolve fleet manager from tripId or driver's active trip
         let fleetManagerId = null;
+        
+        console.log('[monitoring] 🔍 Attempting to resolve fleetManagerId. TripId:', tripId);
+        
         if (tripId) {
             try {
                 const trip = await Trip.findById(tripId).select('fleetManagerId').lean();
+                console.log('[monitoring] 📦 Trip lookup result:', { tripId, foundTrip: !!trip, fleetManagerId: trip?.fleetManagerId });
                 fleetManagerId = trip?.fleetManagerId;
             } catch (tripErr) {
-                console.warn(`[monitoring] Failed to fetch trip ${tripId}:`, tripErr.message);
+                console.warn(`[monitoring] ⚠️  Failed to fetch trip ${tripId}:`, tripErr.message);
             }
+        } else {
+            console.warn('[monitoring] ⚠️  TripId is missing/null - fleet-specific channel will not be triggered. Using fallback global channel.');
         }
 
         // If no fleet manager from trip, attempt best-effort lookup using fleetManagerId from request
         if (!fleetManagerId && req.user?.fleetManagerId) {
+            console.log('[monitoring] 🔄 Fallback: Using fleetManagerId from req.user:', req.user.fleetManagerId);
             fleetManagerId = req.user.fleetManagerId;
         }
 
-        // Trigger to global channel (all fleet managers)
-        await pusherInstance.trigger('global-monitoring', 'admin_monitoring', relayPayload);
-        console.debug(`[monitoring] Relayed to global-monitoring: driverId=${driverId}, status=${status}, monitoringActive=${monitoringActive}`);
+        // 🌐 TRIGGER GLOBAL CHANNEL (ALWAYS)
+        try {
+            await pusherInstance.trigger('global-monitoring', 'admin_monitoring', relayPayload);
+            console.log(`[monitoring] ✅ Pushed to global-monitoring: driverId=${driverId}, status=${status}`);
+        } catch (pushErr) {
+            console.error('[monitoring] ❌ Failed to trigger global-monitoring:', pushErr.message);
+        }
 
-        // Trigger to fleet-specific channel if resolved
+        // 👥 TRIGGER FLEET-SPECIFIC CHANNEL (IF RESOLVED)
         if (fleetManagerId) {
-            await pusherInstance.trigger(`fleet-${fleetManagerId}`, 'admin_monitoring', relayPayload);
-            console.debug(`[monitoring] Relayed to fleet-${fleetManagerId}: driverId=${driverId}`);
+            try {
+                await pusherInstance.trigger(`fleet-${fleetManagerId}`, 'admin_monitoring', relayPayload);
+                console.log(`[monitoring] ✅ Pushed to fleet-${fleetManagerId}: driverId=${driverId}`);
+            } catch (fleetPushErr) {
+                console.error(`[monitoring] ❌ Failed to trigger fleet-${fleetManagerId}:`, fleetPushErr.message);
+            }
+        } else {
+            console.warn('[monitoring] ⚠️  No fleetManagerId resolved - fleet-specific event NOT triggered (global fallback will handle it)');
         }
 
         // Persist to MongoDB (non-blocking) with extended schema
@@ -233,7 +275,7 @@ app.post('/api/realtime/driver-monitoring', async (req, res) => {
 
         res.json({ success: true });
     } catch (err) {
-        console.error('[monitoring] Unhandled error:', err.message);
+        console.error('[monitoring] ❌ Unhandled error:', err.message, err.stack);
         res.status(500).json({ error: 'Failed to relay telemetry' });
     }
 });
