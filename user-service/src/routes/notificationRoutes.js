@@ -5,26 +5,15 @@ const jwt = require('jsonwebtoken');
 
 // Middleware to authenticate user
 const authenticateUser = (req, res, next) => {
-    // Support both x-auth-token and Authorization: Bearer <token>
-    let token = req.header('x-auth-token');
-    if (!token && req.header('Authorization')) {
-        const authHeader = req.header('Authorization');
-        if (authHeader.startsWith('Bearer ')) {
-            token = authHeader.split(' ')[1];
-        }
-    }
-
+    const token = req.header('Authorization')?.replace('Bearer ', '');
+    
     if (!token) {
         return res.status(401).json({ message: 'No token provided' });
     }
 
     try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        // JWT payload is { user: { id, role } } — normalize to userId for route handlers
-        req.user = {
-            userId: decoded.user?.id || decoded.userId || decoded.id,
-            role: decoded.user?.role || decoded.role
-        };
+        req.user = decoded;
         next();
     } catch (error) {
         return res.status(401).json({ message: 'Invalid token' });
@@ -34,7 +23,7 @@ const authenticateUser = (req, res, next) => {
 // Middleware for internal service-to-service calls
 const authenticateInternalService = (req, res, next) => {
     const internalHeader = req.header('X-Internal-Service');
-
+    
     if (internalHeader === 'true') {
         // Internal service call - allow it
         next();
@@ -87,7 +76,7 @@ router.post('/internal/create', authenticateInternalService, async (req, res) =>
  */
 router.get('/', authenticateUser, async (req, res) => {
     try {
-        const userId = req.user.userId;
+        const userId = req.user.user?.id || req.user.userId;
         const { page, limit, unreadOnly } = req.query;
 
         const result = await NotificationService.getUserNotifications(userId, {
@@ -117,7 +106,7 @@ router.get('/', authenticateUser, async (req, res) => {
  */
 router.get('/unread-count', authenticateUser, async (req, res) => {
     try {
-        const userId = req.user.userId;
+        const userId = req.user.user?.id || req.user.userId;
         const count = await NotificationService.getUnreadCount(userId);
 
         res.json({
@@ -141,7 +130,7 @@ router.get('/unread-count', authenticateUser, async (req, res) => {
  */
 router.put('/:id/read', authenticateUser, async (req, res) => {
     try {
-        const userId = req.user.userId;
+        const userId = req.user.user?.id || req.user.userId;
         const notificationId = req.params.id;
 
         const notification = await NotificationService.markAsRead(notificationId, userId);
@@ -167,7 +156,7 @@ router.put('/:id/read', authenticateUser, async (req, res) => {
  */
 router.put('/mark-all-read', authenticateUser, async (req, res) => {
     try {
-        const userId = req.user.userId;
+        const userId = req.user.user?.id || req.user.userId;
         const result = await NotificationService.markAllAsRead(userId);
 
         res.json({
@@ -192,7 +181,7 @@ router.put('/mark-all-read', authenticateUser, async (req, res) => {
  */
 router.delete('/:id', authenticateUser, async (req, res) => {
     try {
-        const userId = req.user.userId;
+        const userId = req.user.user?.id || req.user.userId;
         const notificationId = req.params.id;
 
         await NotificationService.deleteNotification(notificationId, userId);

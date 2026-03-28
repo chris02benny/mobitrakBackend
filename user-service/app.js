@@ -79,7 +79,7 @@ app.options('*', cors(corsOptions));
 // ===== Routes =====
 app.use('/api/users', authRoutes);
 app.use('/api/admin', adminRoutes);
-app.use('/api/notifications', notificationRoutes);
+app.use('/api/users/notifications', notificationRoutes);
 
 // Health Check
 app.get('/health', (req, res) => {
