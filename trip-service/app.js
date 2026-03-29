@@ -66,201 +66,99 @@ app.options('*', cors(corsOptions));
 // ===== Routes =====
 app.use('/api/trips', tripRoutes);
 
-// ===== Pusher & Real-time Routes =====
-const Pusher = require('pusher');
-
-let Trip = null;
+// ===== MongoDB-backed Real-time Routes (Pusher replacement) =====
+let Alert = null;
 let DriverBehaviorLog = null;
 
-// Only initialize Pusher if credentials are provided to gracefully handle missing env vars
-let pusherInstance = null;
-if (process.env.PUSHER_APP_ID && process.env.PUSHER_KEY && process.env.PUSHER_SECRET) {
-    pusherInstance = new Pusher({
-        appId: process.env.PUSHER_APP_ID,
-        key: process.env.PUSHER_KEY,
-        secret: process.env.PUSHER_SECRET,
-        cluster: process.env.PUSHER_CLUSTER || 'ap2',
-        useTLS: true,
-    });
-    
-    // 🔧 LOG PUSHER CONFIG ON STARTUP
-    console.log('[Pusher] ✅ Initialized with config:', {
-        appId: process.env.PUSHER_APP_ID,
-        cluster: process.env.PUSHER_CLUSTER || 'ap2',
-        useTLS: true,
-        keyLength: process.env.PUSHER_KEY?.length || 0,
-        secretLength: process.env.PUSHER_SECRET?.length || 0,
-    });
-} else {
-    console.error('[Pusher] ❌ NOT INITIALIZED - Missing credentials:', {
-        hasAppId: !!process.env.PUSHER_APP_ID,
-        hasKey: !!process.env.PUSHER_KEY,
-        hasSecret: !!process.env.PUSHER_SECRET,
-    });
+// Lazy-load models on first use
+function getAlert() {
+    if (!Alert) Alert = require('./src/models/Alert');
+    return Alert;
 }
 
-app.locals.pusher = pusherInstance;
-
-// Deduplication cache: short-lived map to suppress duplicate events from rapid replays
-const recentEventCache = new Map();
-const DEDUP_WINDOW_MS = 2000; // 2-second dedup window per driver
-
-function getEventHash(driverId, status, monitoringActive, source) {
-    return `${driverId}:${status}:${monitoringActive}:${source}`;
+function getDriverBehaviorLog() {
+    if (!DriverBehaviorLog) {
+        try { DriverBehaviorLog = require('./src/models/DriverBehaviorLog'); } catch (_) { }
+    }
+    return DriverBehaviorLog;
 }
 
-function isDuplicate(hash) {
-    if (recentEventCache.has(hash)) {
-        return true;
-    }
-    recentEventCache.set(hash, true);
-    setTimeout(() => recentEventCache.delete(hash), DEDUP_WINDOW_MS);
-    return false;
-}
-
-/**
- * Normalize and validate monitoring telemetry payload.
- * Contract: {
- *   driverId (required): string,
- *   fleetManagerId (required): string,
- *   status (required): enum DROWSY|ALERT|LOW_LIGHT|NO_FACE|INACTIVE,
- *   monitoringActive (optional): boolean, default true,
- *   source (optional): string,
- *   perclos (optional): number 0-1, default 0,
- *   ear (optional): number >=0, default 0,
- *   timestamp (optional): ISO8601, default now
- * }
- * Returns normalized object or null if validation fails.
- */
-function validateAndNormalizeMonitoringEvent(body) {
-    // Required: driverId
-    if (!body.driverId || typeof body.driverId !== 'string') {
-        return null;
-    }
-
-    // Required: fleetManagerId
-    if (!body.fleetManagerId || typeof body.fleetManagerId !== 'string') {
-        return null;
-    }
-
-    // Required: status from defined enum
-    const validStatuses = ['DROWSY', 'ALERT', 'LOW_LIGHT', 'NO_FACE', 'INACTIVE'];
-    if (!body.status || !validStatuses.includes(body.status)) {
-        return null;
-    }
-
-    // Defaults and coercion
-    const normalized = {
-        driverId: body.driverId,
-        fleetManagerId: body.fleetManagerId,
-        status: body.status,
-        monitoringActive: body.monitoringActive !== undefined ? Boolean(body.monitoringActive) : true,
-        source: body.source || 'driver-monitoring',
-        perclos: Math.max(0, Math.min(1, parseFloat(body.perclos) || 0)),
-        ear: Math.max(0, parseFloat(body.ear) || 0),
-        timestamp: body.timestamp ? new Date(body.timestamp) : new Date(),
-    };
-
-    return normalized;
-}
-
-// ── REST endpoint for driver monitoring telemetry ──────────────────────────────
+// ── REST endpoint for driver monitoring telemetry (MongoDB write) ──────────────
 app.post('/api/realtime/driver-monitoring', async (req, res) => {
     try {
-        // 📥 LOG INCOMING PAYLOAD AS REQUESTED
-        console.log('Incoming telemetry:', req.body);
+        const { driverId, fleetManagerId, status, perclos, ear, timestamp, monitoringActive, source } = req.body;
 
-        // Validate and normalize  
-        const normalized = validateAndNormalizeMonitoringEvent(req.body);
-        if (!normalized) {
-            console.warn('[monitoring] ❌ Invalid payload rejected:', JSON.stringify(req.body).slice(0, 100));
-            return res.status(400).json({ error: 'driverId and fleetManagerId are required' });
+        // Validate required fields
+        if (!driverId || !fleetManagerId || !status) {
+            return res.status(400).json({
+                error: 'driverId, fleetManagerId, and status are required'
+            });
         }
 
-        const { driverId, fleetManagerId, status, monitoringActive, source, perclos, ear, timestamp } = normalized;
+        const AlertModel = getAlert();
 
-        if (!pusherInstance) {
-            console.error('[monitoring] ❌ Pusher not configured. Telemetry ignored.');
-            return res.status(503).json({ error: 'Pusher not configured' });
-        }
-
-        // Deduplication check
-        const eventHash = getEventHash(driverId, status, monitoringActive, source);
-        if (isDuplicate(eventHash)) {
-            console.debug(`[monitoring] ⏭️  Duplicate suppressed: driverId=${driverId}, status=${status}`);
-            return res.json({ success: true, suppressed: true });
-        }
-
-        // Build relay payload with simplified contract
-        const relayPayload = {
+        // Create alert document
+        const alertDoc = await AlertModel.create({
             driverId,
+            fleetManagerId,
             status,
-            timestamp: timestamp.toISOString()
-        };
+            monitoringActive: monitoringActive !== undefined ? monitoringActive : true,
+            source: source || 'frame-analysis',
+            perclos: perclos || 0,
+            ear: ear || 0,
+            timestamp: timestamp ? new Date(timestamp) : new Date()
+        });
 
-        // 🌐 TRIGGER GLOBAL CHANNEL (OPTIONAL - for broadcast awareness)
-        try {
-            await pusherInstance.trigger('global-monitoring', 'driver-alert', relayPayload);
-            console.log(`[monitoring] ✅ Pushed to global-monitoring: driverId=${driverId}, status=${status}`);
-        } catch (pushErr) {
-            console.error('[monitoring] ❌ Failed to trigger global-monitoring:', pushErr.message);
-        }
+        console.log('✅ Alert stored:', { id: alertDoc._id, driverId, fleetManagerId, status });
 
-        // 👥 TRIGGER FLEET-SPECIFIC CHANNEL (PRIMARY)
-        try {
-            await pusherInstance.trigger(`fleet-${fleetManagerId}`, 'driver-alert', relayPayload);
-            console.log(`[monitoring] ✅ Pushed to fleet-${fleetManagerId}: driverId=${driverId}`);
-        } catch (fleetPushErr) {
-            console.error(`[monitoring] ❌ Failed to trigger fleet-${fleetManagerId}:`, fleetPushErr.message);
-        }
-
-        // Persist to MongoDB (non-blocking) with extended schema
-        if (!DriverBehaviorLog) {
-            try { DriverBehaviorLog = require('./src/models/DriverBehaviorLog'); } catch (_) { }
-        }
-        if (DriverBehaviorLog) {
-            DriverBehaviorLog.create({
-                driverId,
-                status,
-                fleetManagerId,
-                monitoringActive,
-                source: source || 'driver-monitoring',
-                perclos,
-                ear,
-                timestamp
-            }).catch(err => console.error('[monitoring] DB log error:', err.message));
-        }
-
-        res.json({ success: true });
+        res.json({ success: true, id: alertDoc._id });
     } catch (err) {
-        console.error('[monitoring] ❌ Unhandled error:', err.message, err.stack);
-        res.status(500).json({ error: 'Failed to relay telemetry' });
+        console.error('❌ Telemetry error:', err.message);
+        res.status(500).json({ error: 'Failed to store alert' });
     }
 });
 
-// ── REST endpoint for location updates ────────────────────────────────────────
+// ── REST endpoint for fetching alerts (polling) ─────────────────────────────────
+app.get('/api/alerts', async (req, res) => {
+    try {
+        const { fleetManagerId, since, limit = 20 } = req.query;
+
+        if (!fleetManagerId) {
+            return res.status(400).json({ error: 'fleetManagerId is required' });
+        }
+
+        const AlertModel = getAlert();
+        const query = { fleetManagerId };
+
+        // Optional: filter by timestamp (since)
+        if (since) {
+            query.timestamp = { $gt: new Date(since) };
+        }
+
+        const alerts = await AlertModel.find(query)
+            .sort({ timestamp: -1 })
+            .limit(Number(limit) || 20)
+            .lean();
+
+        console.log('[alerts] Fetched', alerts.length, 'alerts for', fleetManagerId);
+
+        res.json(alerts);
+    } catch (err) {
+        console.error('❌ Fetch alerts error:', err.message);
+        res.status(500).json({ error: 'Failed to fetch alerts' });
+    }
+});
+
+// ── Legacy location-update endpoint (stubbed for compatibility) ─────────────────
+// Note: This previously used Pusher. Now returns a stub response.
 app.post('/api/realtime/location-update', async (req, res) => {
     try {
-        const { fleetManagerId, vehicleId, location, tripId } = req.body;
-
-        if (!pusherInstance) {
-            return res.status(503).json({ error: 'Pusher not configured' });
-        }
-
-        if (fleetManagerId) {
-            await pusherInstance.trigger(`fleet-${fleetManagerId}`, 'location-update', {
-                vehicleId, location, tripId
-            });
-        }
-        // Also broadcast globally
-        await pusherInstance.trigger('global-monitoring', 'location-update', {
-            vehicleId, location, tripId
-        });
-
-        res.json({ success: true });
+        console.warn('[location] Legacy location-update endpoint called (no longer active)');
+        // Return success without triggering anything
+        res.json({ success: true, message: 'location-update endpoint is deprecated' });
     } catch (err) {
-        console.error('[location] Error triggering location-update:', err.message);
-        res.status(500).json({ error: 'Failed to relay location update' });
+        console.error('[location] Error:', err.message);
+        res.status(500).json({ error: 'location-update endpoint error' });
     }
 });
 
