@@ -84,14 +84,16 @@ function getDriverBehaviorLog() {
 }
 
 // ── REST endpoint for driver monitoring telemetry (MongoDB write) ──────────────
+// Driver POSTs alert data here. The companyId links the alert to the hiring
+// fleet manager (from the employments collection).
 app.post('/api/realtime/driver-monitoring', async (req, res) => {
     try {
-        const { driverId, fleetManagerId, status, perclos, ear, timestamp, monitoringActive, source } = req.body;
+        const { driverId, companyId, status, perclos, ear, timestamp, monitoringActive, source } = req.body;
 
         // Validate required fields
-        if (!driverId || !fleetManagerId || !status) {
+        if (!driverId || !companyId || !status) {
             return res.status(400).json({
-                error: 'driverId, fleetManagerId, and status are required'
+                error: 'driverId, companyId, and status are required'
             });
         }
 
@@ -100,7 +102,7 @@ app.post('/api/realtime/driver-monitoring', async (req, res) => {
         // Create alert document
         const alertDoc = await AlertModel.create({
             driverId,
-            fleetManagerId,
+            companyId,
             status,
             monitoringActive: monitoringActive !== undefined ? monitoringActive : true,
             source: source || 'frame-analysis',
@@ -109,7 +111,7 @@ app.post('/api/realtime/driver-monitoring', async (req, res) => {
             timestamp: timestamp ? new Date(timestamp) : new Date()
         });
 
-        console.log('✅ Alert stored:', { id: alertDoc._id, driverId, fleetManagerId, status });
+        console.log('✅ Alert stored:', { id: alertDoc._id, driverId, companyId, status });
 
         res.json({ success: true, id: alertDoc._id });
     } catch (err) {
@@ -119,18 +121,19 @@ app.post('/api/realtime/driver-monitoring', async (req, res) => {
 });
 
 // ── REST endpoint for fetching alerts (polling) ─────────────────────────────────
+// Fleet manager GETs alerts for all drivers hired under their companyId.
 app.get('/api/alerts', async (req, res) => {
     try {
-        const { fleetManagerId, since, limit = 20 } = req.query;
+        const { companyId, since, limit = 20 } = req.query;
 
-        if (!fleetManagerId) {
-            return res.status(400).json({ error: 'fleetManagerId is required' });
+        if (!companyId) {
+            return res.status(400).json({ error: 'companyId is required' });
         }
 
         const AlertModel = getAlert();
-        const query = { fleetManagerId };
+        const query = { companyId };
 
-        // Optional: filter by timestamp (since)
+        // Optional: filter by timestamp (incremental polling)
         if (since) {
             query.timestamp = { $gt: new Date(since) };
         }
@@ -140,7 +143,7 @@ app.get('/api/alerts', async (req, res) => {
             .limit(Number(limit) || 20)
             .lean();
 
-        console.log('[alerts] Fetched', alerts.length, 'alerts for', fleetManagerId);
+        console.log('[alerts] Fetched', alerts.length, 'alerts for companyId', companyId);
 
         res.json(alerts);
     } catch (err) {

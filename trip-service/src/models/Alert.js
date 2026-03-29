@@ -1,6 +1,12 @@
 /**
  * Alert.js
- * MongoDB model for driver monitoring alerts (Pusher replacement).
+ * MongoDB model for driver monitoring alerts.
+ * 
+ * Schema Design:
+ *   - driverId:  the broadcasting driver's user ID
+ *   - companyId: the hiring fleet manager's company ID (from employments collection)
+ * 
+ * This pairing lets any fleet manager poll only alerts from drivers they hired.
  * Supports write-on-every-update + polling fetch pattern.
  */
 
@@ -15,20 +21,26 @@ const alertSchema = new mongoose.Schema(
       index: true
     },
 
-    /** Fleet manager ID (who receives the alert) */
-    fleetManagerId: {
+    /** Fleet manager's company ID (from employments collection) */
+    companyId: {
       type: String,
       required: true,
       index: true
     },
 
     /**
-     * Alert status: ALERT (normal), DROWSY (drowsy detected), INACTIVE (monitoring off)
+     * Alert status:
+     *   ALERT     – normal / eyes open
+     *   DROWSY    – drowsiness detected
+     *   INACTIVE  – monitoring turned off
+     *   LOW_LIGHT – camera feed too dark for analysis
+     *   NO_FACE   – face not detected in frame
+     *   OFFLINE   – driver went offline (no heartbeat)
      */
     status: {
       type: String,
       required: true,
-      enum: ['ALERT', 'DROWSY', 'INACTIVE'],
+      enum: ['ALERT', 'DROWSY', 'INACTIVE', 'LOW_LIGHT', 'NO_FACE', 'OFFLINE'],
       index: true
     },
 
@@ -59,12 +71,6 @@ const alertSchema = new mongoose.Schema(
       default: 0
     },
 
-    /** For deduplication / idempotency (optional) */
-    eventHash: {
-      type: String,
-      index: true
-    },
-
     /** Client-supplied or server timestamp */
     timestamp: {
       type: Date,
@@ -75,7 +81,7 @@ const alertSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Compound index for efficient polling queries
-alertSchema.index({ fleetManagerId: 1, timestamp: -1 });
+// Compound index for efficient polling: fleet manager fetches latest alerts by companyId
+alertSchema.index({ companyId: 1, timestamp: -1 });
 
 module.exports = mongoose.model('Alert', alertSchema);
