@@ -1,3 +1,6 @@
+const Trip = require('../models/Trip');
+const mapboxService = require('../services/mapboxService');
+const axios = require('axios');
 const NotificationClient = require('../services/notificationClient');
 const path = require('path');
 
