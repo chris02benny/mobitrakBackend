@@ -683,10 +683,10 @@ exports.getDriverAssignedTrips = async (req, res) => {
         // Get trips assigned to this driver
         const trips = await Trip.find({
             driverId: req.user.id,
-            status: { $in: ['scheduled', 'in-progress'] }
+            status: { $in: ['scheduled', 'in-progress', 'completed'] }
         })
         .select('-amountPerKm -vehicleRent -amount') // Exclude pricing details
-        .sort({ startDateTime: 1 }); // Sort by start date (upcoming first)
+        .sort({ startDateTime: -1 }); // Sort by start date (most recent first)
 
         console.log('Found trips count:', trips.length);
         if (trips.length > 0) {
