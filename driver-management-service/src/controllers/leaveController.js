@@ -1,5 +1,6 @@
 const Leave = require('../models/Leave');
 const Employment = require('../models/Employment');
+const User = require('../models/User');
 
 /**
  * @desc   Apply for leave (Driver only)
@@ -154,7 +155,32 @@ const getCompanyLeaves = async (req, res) => {
             .sort({ createdAt: -1 })
             .lean();
 
-        return res.status(200).json({ success: true, leaves });
+        // Populate driver details manually since driverId is just an ObjectId referencing User
+        const leavesWithUser = await Promise.all(
+            leaves.map(async (leave) => {
+                if (leave.driverId) {
+                    try {
+                        const user = await User.findById(leave.driverId).lean();
+                        if (user) {
+                            leave.driverId = {
+                                _id: leave.driverId,
+                                userDetails: {
+                                    firstName: user.firstName,
+                                    lastName: user.lastName,
+                                    profileImage: user.profileImage,
+                                    email: user.email
+                                }
+                            };
+                        }
+                    } catch (err) {
+                        console.error('Error fetching user for leave:', err.message);
+                    }
+                }
+                return leave;
+            })
+        );
+
+        return res.status(200).json({ success: true, leaves: leavesWithUser });
     } catch (error) {
         console.error('getCompanyLeaves error:', error);
         return res.status(500).json({
