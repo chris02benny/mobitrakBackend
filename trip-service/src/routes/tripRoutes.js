@@ -15,10 +15,10 @@ router.use(authMiddleware);
 router.post('/calculate-route', tripController.calculateRoute);
 
 // Check availability of driver or vehicle
-router.get('/check-availability', tripController.checkAvailability);
+// router.get('/check-availability', tripController.checkAvailability);
 
 // Get busy date ranges for driver or vehicle
-router.get('/busy-dates', tripController.getBusyDates);
+// router.get('/busy-dates', tripController.getBusyDates);
 
 // Driver-specific routes (must be before fleetManagerOnly middleware)
 router.get('/driver/assigned', tripController.getDriverAssignedTrips);
