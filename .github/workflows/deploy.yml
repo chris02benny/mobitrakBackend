@@ -51,10 +51,10 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ap-south-1
 
-      # 6. Deploy to AWS Lambda (prod stage)
+      # 6. Deploy to AWS Lambda (dev stage)
       #    Run from repo root — serverless.yml is here
-      - name: Deploy to Lambda (prod)
-        run: npx serverless deploy --stage prod --verbose
+      - name: Deploy to Lambda (dev)
+        run: npx serverless deploy --stage dev --verbose
         env:
           # MongoDB
           MONGO_URI: ${{ secrets.MONGO_URI }}
