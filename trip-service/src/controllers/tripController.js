@@ -1,7 +1,12 @@
-const Trip = require('../models/Trip');
-const mapboxService = require('../services/mapboxService');
-const axios = require('axios');
 const NotificationClient = require('../services/notificationClient');
+const path = require('path');
+
+// Centralize service URLs for internal communication
+// In Serverless environment, all services share the same API Gateway base URL
+const USER_SERVICE_URL = process.env.USER_SERVICE_URL || 'http://localhost:3000';
+const VEHICLE_SERVICE_URL = process.env.VEHICLE_SERVICE_URL || 'http://localhost:3000';
+// driver-management-service uses /api/drivers path under the same base gateway
+const DRIVER_SERVICE_URL = process.env.USER_SERVICE_URL || 'http://localhost:3000';
 
 // Create a new trip
 exports.createTrip = async (req, res) => {
@@ -150,9 +155,14 @@ exports.createTrip = async (req, res) => {
         // Update vehicle status to ASSIGNED
         try {
             await axios.patch(
-                `http://vehicle-service:5002/api/vehicles/${vehicleId}/status`,
+                `${VEHICLE_SERVICE_URL}/api/vehicles/${vehicleId}/status`,
                 { status: 'ASSIGNED' },
-                { headers: { 'x-user-id': req.user.id } }
+                { 
+                    headers: { 
+                        'x-user-id': req.user.id,
+                        'X-Internal-Service': 'true'
+                    } 
+                }
             );
         } catch (error) {
             console.error('Error updating vehicle status:', error.message);
@@ -164,17 +174,26 @@ exports.createTrip = async (req, res) => {
             try {
                 // Update employment record
                 await axios.patch(
-                    `http://driver-management-service:5003/api/drivers/employments/driver/${driverId}/assignment-status`,
+                    `${DRIVER_SERVICE_URL}/api/drivers/employments/driver/${driverId}/assignment-status`,
                     { assignmentStatus: 'ASSIGNED' },
-                    { headers: { 'x-user-id': req.user.id } }
+                    { 
+                        headers: { 
+                            'x-user-id': req.user.id,
+                            'X-Internal-Service': 'true'
+                        } 
+                    }
                 );
 
                 // Update user record
-                const userServiceUrl = process.env.USER_SERVICE_URL || 'http://localhost:5001';
                 await axios.put(
-                    `${userServiceUrl}/api/admin/users/${driverId}/internal-update`,
+                    `${USER_SERVICE_URL}/api/admin/users/${driverId}/internal-update`,
                     { assignmentStatus: 'ASSIGNED' },
-                    { headers: { 'Content-Type': 'application/json' } }
+                    { 
+                        headers: { 
+                            'Content-Type': 'application/json',
+                            'X-Internal-Service': 'true'
+                        } 
+                    }
                 );
 
                 console.log(`Updated driver ${driverId} assignment status to ASSIGNED`);
@@ -355,12 +374,23 @@ exports.updateTrip = async (req, res) => {
         if (req.body.status && ['completed', 'cancelled'].includes(req.body.status) && 
             previousStatus !== req.body.status) {
             
+            // Set actual end time if marking as complete
+            if (req.body.status === 'completed' && !trip.actualEndDateTime) {
+                trip.actualEndDateTime = new Date();
+                await trip.save();
+            }
+            
             // Reset vehicle status to IDLE
             try {
                 await axios.patch(
-                    `http://vehicle-service:5002/api/vehicles/${trip.vehicleId}/status`,
+                    `${VEHICLE_SERVICE_URL}/api/vehicles/${trip.vehicleId}/status`,
                     { status: 'IDLE' },
-                    { headers: { 'x-user-id': req.user.id } }
+                    { 
+                        headers: { 
+                            'x-user-id': req.user.id,
+                            'X-Internal-Service': 'true'
+                        } 
+                    }
                 );
             } catch (error) {
                 console.error('Error resetting vehicle status:', error.message);
@@ -371,17 +401,26 @@ exports.updateTrip = async (req, res) => {
                 try {
                     // Update employment record
                     await axios.patch(
-                        `http://driver-management-service:5003/api/drivers/employments/driver/${trip.driverId}/assignment-status`,
+                        `${DRIVER_SERVICE_URL}/api/drivers/employments/driver/${trip.driverId}/assignment-status`,
                         { assignmentStatus: 'UNASSIGNED' },
-                        { headers: { 'x-user-id': req.user.id } }
+                        { 
+                            headers: { 
+                                'x-user-id': req.user.id,
+                                'X-Internal-Service': 'true'
+                            } 
+                        }
                     );
 
                     // Update user record
-                    const userServiceUrl = process.env.USER_SERVICE_URL || 'http://localhost:5001';
                     await axios.put(
-                        `${userServiceUrl}/api/admin/users/${trip.driverId}/internal-update`,
+                        `${USER_SERVICE_URL}/api/admin/users/${trip.driverId}/internal-update`,
                         { assignmentStatus: 'UNASSIGNED' },
-                        { headers: { 'Content-Type': 'application/json' } }
+                        { 
+                            headers: { 
+                                'Content-Type': 'application/json',
+                                'X-Internal-Service': 'true'
+                            } 
+                        }
                     );
 
                     console.log(`Updated driver ${trip.driverId} assignment status to UNASSIGNED`);
@@ -448,9 +487,14 @@ exports.deleteTrip = async (req, res) => {
         // Reset vehicle status to IDLE before deleting
         try {
             await axios.patch(
-                `http://vehicle-service:5002/api/vehicles/${trip.vehicleId}/status`,
+                `${VEHICLE_SERVICE_URL}/api/vehicles/${trip.vehicleId}/status`,
                 { status: 'IDLE' },
-                { headers: { 'x-user-id': req.user.id } }
+                { 
+                    headers: { 
+                        'x-user-id': req.user.id,
+                        'X-Internal-Service': 'true'
+                    } 
+                }
             );
         } catch (error) {
             console.error('Error resetting vehicle status:', error.message);
@@ -461,17 +505,26 @@ exports.deleteTrip = async (req, res) => {
             try {
                 // Update employment record
                 await axios.patch(
-                    `http://driver-management-service:5003/api/drivers/employments/driver/${trip.driverId}/assignment-status`,
+                    `${DRIVER_SERVICE_URL}/api/drivers/employments/driver/${trip.driverId}/assignment-status`,
                     { assignmentStatus: 'UNASSIGNED' },
-                    { headers: { 'x-user-id': req.user.id } }
+                    { 
+                        headers: { 
+                            'x-user-id': req.user.id,
+                            'X-Internal-Service': 'true'
+                        } 
+                    }
                 );
 
                 // Update user record
-                const userServiceUrl = process.env.USER_SERVICE_URL || 'http://localhost:5001';
                 await axios.put(
-                    `${userServiceUrl}/api/admin/users/${trip.driverId}/internal-update`,
+                    `${USER_SERVICE_URL}/api/admin/users/${trip.driverId}/internal-update`,
                     { assignmentStatus: 'UNASSIGNED' },
-                    { headers: { 'Content-Type': 'application/json' } }
+                    { 
+                        headers: { 
+                            'Content-Type': 'application/json',
+                            'X-Internal-Service': 'true'
+                        } 
+                    }
                 );
 
                 console.log(`Updated driver ${trip.driverId} assignment status to UNASSIGNED`);
