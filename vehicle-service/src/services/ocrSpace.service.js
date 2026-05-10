@@ -5,7 +5,7 @@ dotenv.config();
 
 const extractTextFromImage = async (imageUrl) => {
     try {
-        const apiKey = process.env.OCR_SPACE_API_KEY;
+        const apiKey = process.env.OCR_SPACE_API_KEY_VEHICLE || process.env.OCR_SPACE_API_KEY;
         if (!apiKey) {
             throw new Error('OCR_SPACE_API_KEY is not defined in environment variables');
         }

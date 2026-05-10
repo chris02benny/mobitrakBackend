@@ -10,7 +10,7 @@ dotenv.config();
 
 const extractRCFieldsWithAI = async (ocrText) => {
   try {
-    const apiKey = process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY || process.env.AI_API_KEY;
+    const apiKey = process.env.OPENROUTER_API_KEY_VEHICLE || process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY || process.env.AI_API_KEY;
 
     if (!apiKey) {
       console.warn('[AI Extraction] No API key found, falling back to regex parsing');
