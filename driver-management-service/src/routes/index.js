@@ -5,7 +5,6 @@ const router = express.Router();
 const jobRequestRoutes = require('./jobRequestRoutes');
 const employmentRoutes = require('./employmentRoutes');
 const ratingRoutes = require('./ratingRoutes');
-const leaveRoutes = require('./leaveRoutes');
 
 /**
  * Main Router - combines all routes
@@ -24,8 +23,5 @@ router.use('/employments', employmentRoutes);
 
 // Rating routes
 router.use('/ratings', ratingRoutes);
-
-// Leave management routes
-router.use('/leaves', leaveRoutes);
 
 module.exports = router;

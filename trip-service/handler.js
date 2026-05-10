@@ -28,9 +28,21 @@ const serverlessHandler = serverless(app);
 
 module.exports.handler = async (event, context) => {
     context.callbackWaitsForEmptyEventLoop = false;
+    
+    // Fast-path for CORS preflight OPTIONS requests
+    const method = event.requestContext?.http?.method || event.httpMethod;
+    if (method === 'OPTIONS') {
+        return serverlessHandler(event, context);
+    }
+    
     if (!isConnected) {
-        await connectDB();
-        isConnected = true;
+        try {
+            await connectDB();
+            isConnected = true;
+        } catch (err) {
+            console.error('[handler] MongoDB connection failed, delegating error to Express:', err.message);
+            // Intentionally not throwing so Express can return a 500 with CORS headers
+        }
     }
     return serverlessHandler(event, context);
 };

@@ -165,10 +165,6 @@ functions:
       - httpApi:
           path: /api/realtime
           method: any
-      # Alert polling endpoint (fleet manager fetches driver monitoring alerts)
-      - httpApi:
-          path: /api/alerts
-          method: any
 
 plugins:
   - serverless-offline

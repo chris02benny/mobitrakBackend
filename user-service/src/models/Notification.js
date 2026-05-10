@@ -20,9 +20,6 @@ const notificationSchema = new mongoose.Schema({
             'DRIVER_HIRED',
             'VEHICLE_ADDED',
             'VEHICLE_UPDATED',
-            'TRIP_CREATED',
-            'TRIP_UPDATED',
-            'TRIP_DELETED',
             'SYSTEM'
         ]
     },
