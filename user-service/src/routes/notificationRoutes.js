@@ -76,7 +76,7 @@ router.post('/internal/create', authenticateInternalService, async (req, res) =>
  */
 router.get('/', authenticateUser, async (req, res) => {
     try {
-        const userId = req.user.user?.id || req.user.userId;
+        const userId = req.user?.user?.id || req.user?.userId || req.user?.id || req.user?._id;
         
         if (!userId) {
             console.error('[NOTIFICATION] No userId found in token:', JSON.stringify(req.user));
@@ -122,7 +122,7 @@ router.get('/', authenticateUser, async (req, res) => {
  */
 router.get('/unread-count', authenticateUser, async (req, res) => {
     try {
-        const userId = req.user.user?.id || req.user.userId;
+        const userId = req.user?.user?.id || req.user?.userId || req.user?.id || req.user?._id;
 
         if (!userId) {
             console.error('[NOTIFICATION] No userId found in token for unread-count:', JSON.stringify(req.user));
@@ -157,7 +157,7 @@ router.get('/unread-count', authenticateUser, async (req, res) => {
  */
 router.put('/:id/read', authenticateUser, async (req, res) => {
     try {
-        const userId = req.user.user?.id || req.user.userId;
+        const userId = req.user?.user?.id || req.user?.userId || req.user?.id || req.user?._id;
         const notificationId = req.params.id;
 
         const notification = await NotificationService.markAsRead(notificationId, userId);
@@ -183,7 +183,7 @@ router.put('/:id/read', authenticateUser, async (req, res) => {
  */
 router.put('/mark-all-read', authenticateUser, async (req, res) => {
     try {
-        const userId = req.user.user?.id || req.user.userId;
+        const userId = req.user?.user?.id || req.user?.userId || req.user?.id || req.user?._id;
         const result = await NotificationService.markAllAsRead(userId);
 
         res.json({
@@ -208,7 +208,7 @@ router.put('/mark-all-read', authenticateUser, async (req, res) => {
  */
 router.delete('/:id', authenticateUser, async (req, res) => {
     try {
-        const userId = req.user.user?.id || req.user.userId;
+        const userId = req.user?.user?.id || req.user?.userId || req.user?.id || req.user?._id;
         const notificationId = req.params.id;
 
         await NotificationService.deleteNotification(notificationId, userId);
