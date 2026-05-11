@@ -65,7 +65,7 @@ app.options('*', cors(corsOptions));
 // ===== Routes =====
 app.use('/api/vehicles', vehicleRoutes);
 app.use('/api/vehicles/admin', adminVehicleRoutes);
-app.use('/api/tracking-device', trackingDeviceRoutes);
+app.use('/api/vehicles/tracking-device', trackingDeviceRoutes);
 app.use('/api/maintenance', maintenanceRoutes);
 
 // Health Check
