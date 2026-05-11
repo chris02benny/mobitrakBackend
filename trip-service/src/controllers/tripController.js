@@ -624,13 +624,44 @@ exports.getDriverAssignedTrips = async (req, res) => {
             status: t.status 
         })));
         
+        const mongoose = require('mongoose');
+        
         // Get trips assigned to this driver
-        const trips = await Trip.find({
-            driverId: req.user.id,
-            status: { $in: ['scheduled', 'in-progress'] }
-        })
-        .select('-amountPerKm -vehicleRent -amount') // Exclude pricing details
-        .sort({ startDateTime: 1 }); // Sort by start date (upcoming first)
+        const trips = await Trip.aggregate([
+            {
+                $match: {
+                    driverId: new mongoose.Types.ObjectId(req.user.id),
+                    status: { $in: ['scheduled', 'in-progress', 'completed'] }
+                }
+            },
+            {
+                $lookup: {
+                    from: 'users',
+                    localField: 'driverId',
+                    foreignField: '_id',
+                    as: 'driver'
+                }
+            },
+            {
+                $unwind: {
+                    path: '$driver',
+                    preserveNullAndEmptyArrays: true
+                }
+            },
+            {
+                $project: {
+                    amountPerKm: 0,
+                    vehicleRent: 0,
+                    amount: 0,
+                    'driver.password': 0,
+                    'driver.otp': 0,
+                    'driver.otpExpires': 0
+                }
+            },
+            {
+                $sort: { startDateTime: 1 }
+            }
+        ]);
 
         console.log('Found trips count:', trips.length);
         if (trips.length > 0) {
