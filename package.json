@@ -1,7 +1,7 @@
 {
     "name": "mobitrak-backend",
     "version": "1.0.0",
-    "description": "MobiTrak backend — AWS Lambda deployment tooling",
+    "description": "MobiTrak backend — Lambda + EC2 deployment",
     "scripts": {
         "deploy:dev": "serverless deploy --stage dev",
         "deploy:prod": "serverless deploy --stage prod",
@@ -9,6 +9,11 @@
         "remove:dev": "serverless remove --stage dev",
         "remove:prod": "serverless remove --stage prod",
         "info": "serverless info --stage dev",
+        "start:production": "pm2 start ecosystem.config.js --env production",
+        "stop:production": "pm2 stop ecosystem.config.js",
+        "restart:production": "pm2 reload ecosystem.config.js --env production",
+        "logs": "pm2 logs",
+        "status": "pm2 status",
         "install:all": "npm install && cd user-service && npm install && cd ../vehicle-service && npm install && cd ../driver-management-service && npm install && cd ../trip-service && npm install && cd .."
     },
     "dependencies": {

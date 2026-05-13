@@ -4,6 +4,9 @@ node_modules/
 dist/
 .env
 
+# PM2 logs
+logs/
+
 # Serverless Framework deployment artifacts
 .serverless/
 .serverless_plugins/
