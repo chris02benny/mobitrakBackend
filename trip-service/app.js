@@ -29,6 +29,7 @@ const dotenv = require('dotenv');
 dotenv.config();
 
 const tripRoutes = require('./src/routes/tripRoutes');
+const incidentRoutes = require('./src/routes/incidentRoutes');
 
 const app = express();
 
@@ -65,6 +66,7 @@ app.options('*', cors(corsOptions));
 
 // ===== Routes =====
 app.use('/api/trips', tripRoutes);
+app.use('/api/incidents', incidentRoutes);
 
 // ===== MongoDB-backed Real-time Routes (Pusher replacement) =====
 let Alert = null;
