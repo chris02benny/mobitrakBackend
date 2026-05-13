@@ -64,12 +64,16 @@ io.on('connection', (socket) => {
             // Always broadcast globally for now so any fleet manager can see it
             // (since we want all hired drivers to show up regardless of active trips)
             io.emit('admin_monitoring', data);
+            
+            // Also emit as 'new-alert' for the standardized listener
+            io.emit('new-alert', data);
 
             // If there's an active trip, also send to the specific fleet manager's room
             if (tripId) {
                 const trip = await Trip.findById(tripId).select('fleetManagerId').lean();
                 if (trip?.fleetManagerId) {
                     io.to(`fleet-${trip.fleetManagerId}`).emit('admin_monitoring', data);
+                    io.to(`fleet-${trip.fleetManagerId}`).emit('new-alert', data);
                 }
             }
         } catch (err) {

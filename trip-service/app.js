@@ -113,6 +113,14 @@ app.post('/api/realtime/driver-monitoring', async (req, res) => {
 
         console.log('✅ Alert stored:', { id: alertDoc._id, driverId, companyId, status });
 
+        // Emit real-time socket event if io is available
+        const io = req.app.get('io');
+        if (io) {
+            // Emit to the specific fleet manager's room
+            io.to(`fleet-${companyId}`).emit('new-alert', alertDoc);
+            console.log(`[socket] Emitted new-alert to fleet-${companyId}`);
+        }
+
         res.json({ success: true, id: alertDoc._id });
     } catch (err) {
         console.error('❌ Telemetry error:', err.message);

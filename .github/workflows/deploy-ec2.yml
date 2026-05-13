@@ -15,87 +15,114 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. Deploy via SSH
-      - name: Deploy to EC2 via SSH
-        uses: appleboy/ssh-action@v1.2.0
+      # 2. Deploy via SSH and generate .env from Secrets
+      - name: SSH into EC2 and Deploy
+        uses: appleboy/ssh-action@master
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           port: 22
-          command_timeout: 10m
-          script: |
-            set -e
+          envs: MONGO_URI,JWT_SECRET,SMTP_HOST,SMTP_PORT,SMTP_USER,SMTP_PASS,EMAIL_FROM,CLOUDINARY_CLOUD_NAME,CLOUDINARY_API_KEY,CLOUDINARY_API_SECRET,OCR_SPACE_API_KEY_USER,OCR_SPACE_API_KEY_VEHICLE,OPENROUTER_API_KEY_USER,OPENROUTER_API_KEY_VEHICLE,AI_API_URL,AI_MODEL,MAPBOX_ACCESS_TOKEN,FRONTEND_URL,ALLOWED_ORIGINS,PUSHER_APP_ID,PUSHER_KEY,PUSHER_SECRET,PUSHER_CLUSTER
+        env:
+          MONGO_URI: ${{ secrets.MONGO_URI }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          CLOUDINARY_CLOUD_NAME: ${{ secrets.CLOUDINARY_CLOUD_NAME }}
+          CLOUDINARY_API_KEY: ${{ secrets.CLOUDINARY_API_KEY }}
+          CLOUDINARY_API_SECRET: ${{ secrets.CLOUDINARY_API_SECRET }}
+          OCR_SPACE_API_KEY_USER: ${{ secrets.OCR_SPACE_API_KEY_USER }}
+          OCR_SPACE_API_KEY_VEHICLE: ${{ secrets.OCR_SPACE_API_KEY_VEHICLE }}
+          OPENROUTER_API_KEY_USER: ${{ secrets.OPENROUTER_API_KEY_USER }}
+          OPENROUTER_API_KEY_VEHICLE: ${{ secrets.OPENROUTER_API_KEY_VEHICLE }}
+          AI_API_URL: ${{ secrets.AI_API_URL }}
+          AI_MODEL: ${{ secrets.AI_MODEL }}
+          MAPBOX_ACCESS_TOKEN: ${{ secrets.MAPBOX_ACCESS_TOKEN }}
+          FRONTEND_URL: ${{ secrets.FRONTEND_URL }}
+          ALLOWED_ORIGINS: ${{ secrets.ALLOWED_ORIGINS }}
+          PUSHER_APP_ID: ${{ secrets.PUSHER_APP_ID }}
+          PUSHER_KEY: ${{ secrets.PUSHER_KEY }}
+          PUSHER_SECRET: ${{ secrets.PUSHER_SECRET }}
+          PUSHER_CLUSTER: ${{ secrets.PUSHER_CLUSTER }}
+        script: |
+          set -e
+          APP_DIR=~/mobitrak-backend
 
-            APP_DIR=~/mobitrak-backend
-            REPO_URL=${{ secrets.EC2_REPO_URL }}
+          echo "==========================================="
+          echo "  MobiTrak EC2 Deployment"
+          echo "  $(date)"
+          echo "==========================================="
 
-            echo "==========================================="
-            echo "  MobiTrak EC2 Deployment"
-            echo "  $(date)"
-            echo "==========================================="
+          # 1. Navigate or Clone
+          if [ ! -d "$APP_DIR" ]; then
+              git clone https://github.com/your-username/your-repo.git "$APP_DIR"
+          fi
+          cd "$APP_DIR"
 
-            # --- Step 1: Clone or pull ---
-            if [ ! -d "$APP_DIR" ]; then
-                echo "[1/5] Cloning repository..."
-                git clone "$REPO_URL" "$APP_DIR"
-            else
-                echo "[1/5] Pulling latest changes..."
-                cd "$APP_DIR"
-                git fetch --all
-                git reset --hard origin/master
-            fi
+          # 2. Pull latest
+          git fetch --all
+          git reset --hard origin/master
 
-            cd "$APP_DIR"
+          # 3. Generate .env file from Secrets
+          echo "Generating .env file..."
+          cat <<EOF > .env
+          NODE_ENV=production
+          MONGO_URI=$MONGO_URI
+          JWT_SECRET=$JWT_SECRET
+          SMTP_HOST=$SMTP_HOST
+          SMTP_PORT=$SMTP_PORT
+          SMTP_USER=$SMTP_USER
+          SMTP_PASS=$SMTP_PASS
+          EMAIL_FROM=$EMAIL_FROM
+          CLOUDINARY_CLOUD_NAME=$CLOUDINARY_CLOUD_NAME
+          CLOUDINARY_API_KEY=$CLOUDINARY_API_KEY
+          CLOUDINARY_API_SECRET=$CLOUDINARY_API_SECRET
+          OCR_SPACE_API_KEY_USER=$OCR_SPACE_API_KEY_USER
+          OCR_SPACE_API_KEY_VEHICLE=$OCR_SPACE_API_KEY_VEHICLE
+          OPENROUTER_API_KEY_USER=$OPENROUTER_API_KEY_USER
+          OPENROUTER_API_KEY_VEHICLE=$OPENROUTER_API_KEY_VEHICLE
+          AI_API_URL=$AI_API_URL
+          AI_MODEL=$AI_MODEL
+          MAPBOX_ACCESS_TOKEN=$MAPBOX_ACCESS_TOKEN
+          FRONTEND_URL=$FRONTEND_URL
+          ALLOWED_ORIGINS=$ALLOWED_ORIGINS
+          PUSHER_APP_ID=$PUSHER_APP_ID
+          PUSHER_KEY=$PUSHER_KEY
+          PUSHER_SECRET=$PUSHER_SECRET
+          PUSHER_CLUSTER=$PUSHER_CLUSTER
+          USER_SERVICE_PORT=5001
+          VEHICLE_SERVICE_PORT=5002
+          DRIVER_SERVICE_PORT=5003
+          TRIP_SERVICE_PORT=5004
+          USER_SERVICE_URL=http://localhost:5001
+          NOTIFICATION_SERVICE_URL=http://localhost:5001
+          TRIP_SERVICE_URL=http://localhost:5004
+          VEHICLE_SERVICE_URL=http://localhost:5002
+          EOF
 
-            # --- Step 2: Install dependencies ---
-            echo "[2/5] Installing dependencies..."
-            npm install --production
-            cd user-service && npm install --production && cd ..
-            cd vehicle-service && npm install --production && cd ..
-            cd driver-management-service && npm install --production && cd ..
-            cd trip-service && npm install --production && cd ..
+          # 4. Install and Restart
+          echo "Installing dependencies..."
+          npm run install:all
+          
+          echo "Restarting services..."
+          if pm2 list | grep -q "user-service"; then
+              pm2 reload ecosystem.config.js --env production
+          else
+              pm2 start ecosystem.config.js --env production
+          fi
 
-            # --- Step 3: Create logs directory ---
-            echo "[3/5] Ensuring logs directory exists..."
-            mkdir -p logs
+          pm2 save
 
-            # --- Step 4: Restart services with PM2 ---
-            echo "[4/5] Restarting services with PM2..."
-            # Use reload for zero-downtime restart if processes are already running
-            if pm2 list | grep -q "user-service"; then
-                echo "  Services already running — performing graceful reload..."
-                pm2 reload ecosystem.config.js --env production
-            else
-                echo "  Starting services for the first time..."
-                pm2 start ecosystem.config.js --env production
-            fi
+          # 5. Health checks
+          echo "Running health checks..."
+          sleep 5
+          curl -sf http://localhost:5001/health || echo "❌ User Service down"
+          curl -sf http://localhost:5002/health || echo "❌ Vehicle Service down"
+          curl -sf http://localhost:5003/health || echo "❌ Driver Service down"
+          curl -sf http://localhost:5004/health || echo "❌ Trip Service down"
 
-            # --- Step 5: Save PM2 state ---
-            echo "[5/5] Saving PM2 state..."
-            pm2 save
-
-            # --- Health check ---
-            echo ""
-            echo "Running health checks..."
-            sleep 5
-
-            check_health() {
-                local name=$1
-                local port=$2
-                if curl -sf "http://localhost:$port/health" > /dev/null 2>&1; then
-                    echo "  ✅ $name (port $port) — healthy"
-                else
-                    echo "  ❌ $name (port $port) — NOT responding"
-                fi
-            }
-
-            check_health "User Service"    5001
-            check_health "Vehicle Service"  5002
-            check_health "Driver Service"   5003
-            check_health "Trip Service"     5004
-
-            echo ""
-            echo "==========================================="
-            echo "  Deployment complete!"
-            echo "==========================================="
+          echo "Deployment successful!"
