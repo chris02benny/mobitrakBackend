@@ -95,7 +95,6 @@ function registerIncidentHandler(io, socket) {
     socket.on('incident:report', async (data) => {
         const {
             driverId,
-            businessId,
             status,
             perclos = 0,
             ear = 0,
@@ -106,8 +105,11 @@ function registerIncidentHandler(io, socket) {
             gpsLocation,
         } = data;
 
+        // Normalize businessId from whichever field name the driver sends
+        const businessId = data.businessId || data.companyId || data.fleetManagerId;
+
         if (!driverId || !businessId) {
-            console.warn('[incident] Missing driverId or businessId in incident:report');
+            console.warn('[incident] Missing driverId or businessId in incident:report. driverId:', driverId, 'businessId:', businessId);
             return;
         }
 

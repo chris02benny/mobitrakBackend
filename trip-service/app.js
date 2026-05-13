@@ -90,12 +90,14 @@ function getDriverBehaviorLog() {
 // fleet manager (from the employments collection).
 app.post('/api/realtime/driver-monitoring', async (req, res) => {
     try {
-        const { driverId, companyId, status, perclos, ear, timestamp, monitoringActive, source } = req.body;
+        const { driverId, status, perclos, ear, timestamp, monitoringActive, source } = req.body;
+        // Accept both field names — frontend may send 'fleetManagerId', 'companyId', or 'businessId'
+        const companyId = req.body.companyId || req.body.fleetManagerId || req.body.businessId;
 
         // Validate required fields
         if (!driverId || !companyId || !status) {
             return res.status(400).json({
-                error: 'driverId, companyId, and status are required'
+                error: 'driverId, companyId (or fleetManagerId), and status are required'
             });
         }
 
