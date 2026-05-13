@@ -48,81 +48,81 @@ jobs:
           PUSHER_KEY: ${{ secrets.PUSHER_KEY }}
           PUSHER_SECRET: ${{ secrets.PUSHER_SECRET }}
           PUSHER_CLUSTER: ${{ secrets.PUSHER_CLUSTER }}
-        script: |
-          set -e
-          APP_DIR=~/mobitrak-backend
+          script: |
+            set -e
+            APP_DIR=~/mobitrak-backend
 
-          echo "==========================================="
-          echo "  MobiTrak EC2 Deployment"
-          echo "  $(date)"
-          echo "==========================================="
+            echo "==========================================="
+            echo "  MobiTrak EC2 Deployment"
+            echo "  $(date)"
+            echo "==========================================="
 
-          # 1. Navigate or Clone
-          if [ ! -d "$APP_DIR" ]; then
-              git clone https://github.com/your-username/your-repo.git "$APP_DIR"
-          fi
-          cd "$APP_DIR"
+            # 1. Navigate or Clone
+            if [ ! -d "$APP_DIR" ]; then
+                git clone https://github.com/chris02benny/mobitrakBackend.git "$APP_DIR"
+            fi
+            cd "$APP_DIR"
 
-          # 2. Pull latest
-          git fetch --all
-          git reset --hard origin/master
+            # 2. Pull latest
+            git fetch --all
+            git reset --hard origin/master
 
-          # 3. Generate .env file from Secrets
-          echo "Generating .env file..."
-          cat <<EOF > .env
-          NODE_ENV=production
-          MONGO_URI=$MONGO_URI
-          JWT_SECRET=$JWT_SECRET
-          SMTP_HOST=$SMTP_HOST
-          SMTP_PORT=$SMTP_PORT
-          SMTP_USER=$SMTP_USER
-          SMTP_PASS=$SMTP_PASS
-          EMAIL_FROM=$EMAIL_FROM
-          CLOUDINARY_CLOUD_NAME=$CLOUDINARY_CLOUD_NAME
-          CLOUDINARY_API_KEY=$CLOUDINARY_API_KEY
-          CLOUDINARY_API_SECRET=$CLOUDINARY_API_SECRET
-          OCR_SPACE_API_KEY_USER=$OCR_SPACE_API_KEY_USER
-          OCR_SPACE_API_KEY_VEHICLE=$OCR_SPACE_API_KEY_VEHICLE
-          OPENROUTER_API_KEY_USER=$OPENROUTER_API_KEY_USER
-          OPENROUTER_API_KEY_VEHICLE=$OPENROUTER_API_KEY_VEHICLE
-          AI_API_URL=$AI_API_URL
-          AI_MODEL=$AI_MODEL
-          MAPBOX_ACCESS_TOKEN=$MAPBOX_ACCESS_TOKEN
-          FRONTEND_URL=$FRONTEND_URL
-          ALLOWED_ORIGINS=$ALLOWED_ORIGINS
-          PUSHER_APP_ID=$PUSHER_APP_ID
-          PUSHER_KEY=$PUSHER_KEY
-          PUSHER_SECRET=$PUSHER_SECRET
-          PUSHER_CLUSTER=$PUSHER_CLUSTER
-          USER_SERVICE_PORT=5001
-          VEHICLE_SERVICE_PORT=5002
-          DRIVER_SERVICE_PORT=5003
-          TRIP_SERVICE_PORT=5004
-          USER_SERVICE_URL=http://localhost:5001
-          NOTIFICATION_SERVICE_URL=http://localhost:5001
-          TRIP_SERVICE_URL=http://localhost:5004
-          VEHICLE_SERVICE_URL=http://localhost:5002
-          EOF
+            # 3. Generate .env file from Secrets
+            echo "Generating .env file..."
+            cat <<EOF > .env
+            NODE_ENV=production
+            MONGO_URI=$MONGO_URI
+            JWT_SECRET=$JWT_SECRET
+            SMTP_HOST=$SMTP_HOST
+            SMTP_PORT=$SMTP_PORT
+            SMTP_USER=$SMTP_USER
+            SMTP_PASS=$SMTP_PASS
+            EMAIL_FROM=$EMAIL_FROM
+            CLOUDINARY_CLOUD_NAME=$CLOUDINARY_CLOUD_NAME
+            CLOUDINARY_API_KEY=$CLOUDINARY_API_KEY
+            CLOUDINARY_API_SECRET=$CLOUDINARY_API_SECRET
+            OCR_SPACE_API_KEY_USER=$OCR_SPACE_API_KEY_USER
+            OCR_SPACE_API_KEY_VEHICLE=$OCR_SPACE_API_KEY_VEHICLE
+            OPENROUTER_API_KEY_USER=$OPENROUTER_API_KEY_USER
+            OPENROUTER_API_KEY_VEHICLE=$OPENROUTER_API_KEY_VEHICLE
+            AI_API_URL=$AI_API_URL
+            AI_MODEL=$AI_MODEL
+            MAPBOX_ACCESS_TOKEN=$MAPBOX_ACCESS_TOKEN
+            FRONTEND_URL=$FRONTEND_URL
+            ALLOWED_ORIGINS=$ALLOWED_ORIGINS
+            PUSHER_APP_ID=$PUSHER_APP_ID
+            PUSHER_KEY=$PUSHER_KEY
+            PUSHER_SECRET=$PUSHER_SECRET
+            PUSHER_CLUSTER=$PUSHER_CLUSTER
+            USER_SERVICE_PORT=5001
+            VEHICLE_SERVICE_PORT=5002
+            DRIVER_SERVICE_PORT=5003
+            TRIP_SERVICE_PORT=5004
+            USER_SERVICE_URL=http://localhost:5001
+            NOTIFICATION_SERVICE_URL=http://localhost:5001
+            TRIP_SERVICE_URL=http://localhost:5004
+            VEHICLE_SERVICE_URL=http://localhost:5002
+            EOF
 
-          # 4. Install and Restart
-          echo "Installing dependencies..."
-          npm run install:all
-          
-          echo "Restarting services..."
-          if pm2 list | grep -q "user-service"; then
-              pm2 reload ecosystem.config.js --env production
-          else
-              pm2 start ecosystem.config.js --env production
-          fi
+            # 4. Install and Restart
+            echo "Installing dependencies..."
+            npm run install:all
+            
+            echo "Restarting services..."
+            if pm2 list | grep -q "user-service"; then
+                pm2 reload ecosystem.config.js --env production
+            else
+                pm2 start ecosystem.config.js --env production
+            fi
 
-          pm2 save
+            pm2 save
 
-          # 5. Health checks
-          echo "Running health checks..."
-          sleep 5
-          curl -sf http://localhost:5001/health || echo "❌ User Service down"
-          curl -sf http://localhost:5002/health || echo "❌ Vehicle Service down"
-          curl -sf http://localhost:5003/health || echo "❌ Driver Service down"
-          curl -sf http://localhost:5004/health || echo "❌ Trip Service down"
+            # 5. Health checks
+            echo "Running health checks..."
+            sleep 5
+            curl -sf http://localhost:5001/health || echo "❌ User Service down"
+            curl -sf http://localhost:5002/health || echo "❌ Vehicle Service down"
+            curl -sf http://localhost:5003/health || echo "❌ Driver Service down"
+            curl -sf http://localhost:5004/health || echo "❌ Trip Service down"
 
-          echo "Deployment successful!"
+            echo "Deployment successful!"
