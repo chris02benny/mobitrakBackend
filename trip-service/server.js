@@ -22,7 +22,20 @@ const server = http.createServer(app);
 // Initialize Socket.IO with CORS
 const io = socketIO(server, {
     cors: {
-        origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+        origin: (origin, callback) => {
+            const allowed = [
+                'http://localhost:5173',
+                'https://mobitrakapp.vercel.app',
+                process.env.FRONTEND_URL,
+                ...(process.env.ALLOWED_ORIGINS || '').split(',').map(o => o.trim())
+            ].filter(Boolean);
+            
+            if (!origin || allowed.includes(origin)) {
+                callback(null, true);
+            } else {
+                callback(new Error('Not allowed by CORS'));
+            }
+        },
         methods: ['GET', 'POST', 'PUT', 'DELETE'],
         credentials: true
     },

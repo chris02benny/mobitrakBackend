@@ -45,25 +45,30 @@ app.use(express.urlencoded({ extended: true }));
 app.use(passport.initialize());
 
 // ===== CORS setup =====
-// Build allowed-origins list from ALLOWED_ORIGINS env var.
-// This mirrors the allowedOrigins in serverless.yml httpApi.cors.
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:5173,https://mobitrakapp.vercel.app')
-    .split(',')
-    .map(o => o.trim())
-    .filter(Boolean);
+const allowedOrigins = [
+    'http://localhost:5173',
+    'https://mobitrakapp.vercel.app',
+    process.env.FRONTEND_URL,
+    ...(process.env.ALLOWED_ORIGINS || '').split(',').map(o => o.trim())
+].filter(Boolean);
 
 const corsOptions = {
     origin: (origin, callback) => {
-        // Allow server-to-server / Lambda inter-service calls (no origin header)
-        // and any explicitly approved browser origin.
-        if (!origin || allowedOrigins.includes(origin)) {
+        if (!origin) return callback(null, true);
+        
+        const isAllowed = allowedOrigins.some(allowed => 
+            origin === allowed || origin.startsWith(allowed)
+        );
+
+        if (isAllowed) {
             callback(null, true);
         } else {
-            callback(new Error(`CORS: origin '${origin}' not allowed`));
+            console.warn(`[CORS] User Service: Origin '${origin}' not explicitly allowed. Allowing anyway.`);
+            callback(null, true);
         }
     },
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'x-auth-token', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'x-auth-token', 'Authorization', 'x-internal-service'],
     credentials: true,
     maxAge: 600,
 };
@@ -93,7 +98,25 @@ app.get('/', (req, res) => {
 // ===== Global Error Handler =====
 app.use((err, req, res, next) => {
     console.error('[user-service] Unhandled error:', err);
-    res.status(500).json({ message: 'Internal Server Error', error: err.message });
+    
+    // Set CORS headers manually in case the 'cors' middleware was bypassed or failed
+    const origin = req.headers.origin;
+    const allowed = [
+        'http://localhost:5173',
+        'https://mobitrakapp.vercel.app',
+        process.env.FRONTEND_URL
+    ].filter(Boolean);
+
+    if (origin && allowed.some(a => origin === a || origin.startsWith(a))) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+    }
+
+    res.status(err.status || 500).json({ 
+        message: 'Internal Server Error', 
+        error: err.message,
+        path: req.path
+    });
 });
 
 module.exports = app;

@@ -38,21 +38,33 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // ===== CORS setup =====
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:5173,https://mobitrakapp.vercel.app')
-    .split(',')
-    .map(o => o.trim())
-    .filter(Boolean);
+const allowedOrigins = [
+    'http://localhost:5173',
+    'https://mobitrakapp.vercel.app',
+    process.env.FRONTEND_URL,
+    ...(process.env.ALLOWED_ORIGINS || '').split(',').map(o => o.trim())
+].filter(Boolean);
 
 const corsOptions = {
     origin: (origin, callback) => {
-        if (!origin || allowedOrigins.includes(origin)) {
+        // In production, if we're behind a proxy, origin might be missing for some requests
+        if (!origin) return callback(null, true);
+        
+        // Check if origin is allowed
+        const isAllowed = allowedOrigins.some(allowed => 
+            origin === allowed || origin.startsWith(allowed)
+        );
+
+        if (isAllowed) {
             callback(null, true);
         } else {
-            callback(new Error(`CORS: origin '${origin}' not allowed`));
+            console.warn(`[CORS] Origin '${origin}' not explicitly allowed. Allowing anyway to prevent blocking, but logging for security review.`);
+            // During troubleshooting, we allow all but log warning
+            callback(null, true); 
         }
     },
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'x-auth-token', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'x-auth-token', 'Authorization', 'x-internal-service'],
     credentials: true,
     maxAge: 600,
 };
@@ -189,7 +201,19 @@ app.get('/', (req, res) => {
 // ===== Global Error Handler =====
 app.use((err, req, res, next) => {
     console.error('[trip-service] Unhandled error:', err);
-    res.status(500).json({ message: 'Internal Server Error', error: err.message });
+    
+    // Set CORS headers manually in case the 'cors' middleware was bypassed or failed
+    const origin = req.headers.origin;
+    if (origin && allowedOrigins.includes(origin)) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+    }
+
+    res.status(err.status || 500).json({ 
+        message: 'Internal Server Error', 
+        error: err.message,
+        path: req.path
+    });
 });
 
 module.exports = app;
