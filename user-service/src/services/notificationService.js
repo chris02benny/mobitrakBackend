@@ -35,7 +35,14 @@ class NotificationService {
                 throw new Error('userId is required');
             }
 
-            const query = { userId };
+            // Convert to ObjectId if it's a string to avoid casting issues in Promise.all
+            const mongoose = require('mongoose');
+            let queryUserId = userId;
+            if (typeof userId === 'string' && mongoose.Types.ObjectId.isValid(userId)) {
+                queryUserId = new mongoose.Types.ObjectId(userId);
+            }
+
+            const query = { userId: queryUserId };
             if (unreadOnly) {
                 query.isRead = false;
             }
@@ -68,7 +75,11 @@ class NotificationService {
                 totalPages: Math.ceil(total / limit)
             };
         } catch (error) {
-            console.error('[NOTIFICATION] Error fetching notifications:', error.message, error);
+            console.error('[NOTIFICATION] Error fetching notifications:', {
+                userId,
+                message: error.message,
+                stack: error.stack
+            });
             throw error;
         }
     }
