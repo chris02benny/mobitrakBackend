@@ -104,11 +104,16 @@ app.use((err, req, res, next) => {
     const allowed = [
         'http://localhost:5173',
         'https://mobitrakapp.vercel.app',
-        process.env.FRONTEND_URL
+        process.env.FRONTEND_URL,
+        ...(process.env.ALLOWED_ORIGINS || '').split(',').map(o => o.trim())
     ].filter(Boolean);
 
-    if (origin && allowed.some(a => origin === a || origin.startsWith(a))) {
+    if (origin && allowed.some(a => origin === a || origin.startsWith(a.replace(/\/$/, '')))) {
         res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+    } else if (!origin) {
+        // Fallback for missing origin header
+        res.setHeader('Access-Control-Allow-Origin', 'https://mobitrakapp.vercel.app');
         res.setHeader('Access-Control-Allow-Credentials', 'true');
     }
 

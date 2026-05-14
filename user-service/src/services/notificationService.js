@@ -38,8 +38,18 @@ class NotificationService {
             // Convert to ObjectId if it's a string to avoid casting issues in Promise.all
             const mongoose = require('mongoose');
             let queryUserId = userId;
-            if (typeof userId === 'string' && mongoose.Types.ObjectId.isValid(userId)) {
+            
+            if (mongoose.Types.ObjectId.isValid(userId)) {
                 queryUserId = new mongoose.Types.ObjectId(userId);
+            } else {
+                console.error('[NOTIFICATION] Invalid userId provided:', userId);
+                return {
+                    notifications: [],
+                    total: 0,
+                    unreadCount: 0,
+                    page: parseInt(page),
+                    totalPages: 0
+                };
             }
 
             const query = { userId: queryUserId };
@@ -49,7 +59,7 @@ class NotificationService {
 
             const skip = (page - 1) * limit;
 
-            console.log('[NOTIFICATION] Database query for user', userId, 'with options:', {
+            console.log('[NOTIFICATION] Database query for user', queryUserId, 'with options:', {
                 page,
                 limit,
                 unreadOnly,
@@ -62,7 +72,7 @@ class NotificationService {
                     .skip(skip)
                     .limit(limit),
                 Notification.countDocuments(query),
-                Notification.getUnreadCount(userId)
+                Notification.getUnreadCount(queryUserId)
             ]);
 
             console.log('[NOTIFICATION] Found', notifications.length, 'notifications for user', userId);

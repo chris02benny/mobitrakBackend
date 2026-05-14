@@ -106,7 +106,10 @@ router.get('/', authenticateUser, async (req, res) => {
             data: result
         });
     } catch (error) {
-        console.error('[NOTIFICATION] Error fetching notifications:', error.message, error.stack);
+        console.error('[NOTIFICATION] Error fetching notifications for userId:', userId, {
+            message: error.message,
+            stack: error.stack
+        });
         res.status(500).json({
             success: false,
             message: 'Failed to fetch notifications',
